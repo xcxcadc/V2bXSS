@@ -13,6 +13,7 @@ import (
 	"github.com/InazumaV/V2bX/common/counter"
 	"github.com/InazumaV/V2bX/common/rate"
 	"github.com/InazumaV/V2bX/limiter"
+	"github.com/InazumaV/V2bX/securityaudit"
 
 	"github.com/xtls/xray-core/app/dispatcher"
 	"github.com/xtls/xray-core/common"
@@ -525,6 +526,16 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 
 	sessionInbound := session.InboundFromContext(ctx)
 	if sessionInbound.User != nil {
+		auditTarget, auditDomain := destination.Address.String(), ""
+		if destination.Address.Family().IsDomain() && ob.OriginalTarget.IsValid() && ob.OriginalTarget.Address.Family().IsIP() {
+			auditTarget, auditDomain = ob.OriginalTarget.Address.String(), destination.Address.Domain()
+		}
+		if securityaudit.CheckEndpoint(sessionInbound.Tag, sessionInbound.User.Email,
+			auditTarget, auditDomain, uint16(destination.Port), protocol) {
+			common.Close(link.Writer)
+			common.Interrupt(link.Reader)
+			return
+		}
 		if l == nil {
 			var err error
 			l, err = limiter.GetLimiter(sessionInbound.Tag)

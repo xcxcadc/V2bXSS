@@ -2,17 +2,16 @@ package node
 
 import (
 	"log"
-	"os"
 	"testing"
 
 	"github.com/InazumaV/V2bX/conf"
 )
 
-var l *Lego
-
-func init() {
-	var err error
-	l, err = NewLego(&conf.CertConfig{
+// Creating a Lego client may contact ACME even before a certificate is issued.
+// Keep that side effect inside the explicitly selected integration tests.
+func newTestLego(t *testing.T) *Lego {
+	t.Helper()
+	l, err := NewLego(&conf.CertConfig{
 		CertMode:   "dns",
 		Email:      "test@test.com",
 		CertDomain: "test.test.com",
@@ -24,12 +23,13 @@ func init() {
 		KeyFile:  "./cert/1.key",
 	})
 	if err != nil {
-		log.Println(err)
-		os.Exit(1)
+		t.Fatal(err)
 	}
+	return l
 }
 
 func TestLego_CreateCertByDns(t *testing.T) {
+	l := newTestLego(t)
 	err := l.CreateCert()
 	if err != nil {
 		t.Error(err)
@@ -37,5 +37,6 @@ func TestLego_CreateCertByDns(t *testing.T) {
 }
 
 func TestLego_RenewCert(t *testing.T) {
+	l := newTestLego(t)
 	log.Println(l.RenewCert())
 }

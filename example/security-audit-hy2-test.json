@@ -1,0 +1,30 @@
+{
+  "Log": {"Level": "info"},
+  "Cores": [{"Type": "hysteria2"}],
+  "Nodes": [
+    {
+      "ApiConfig": {
+        "ApiHost": "https://panel.example",
+        "ApiKey": "REPLACE_WITH_TEST_NODE_TOKEN",
+        "NodeID": 1,
+        "NodeType": "hysteria2",
+        "Timeout": 10,
+        "SecurityAuditCachePath": "/etc/V2bX-audit-test/audit-cache-hy2.json"
+      },
+      "Options": {
+        "Core": "hysteria2",
+        "Name": "audit-test-hy2",
+        "ListenIP": "127.0.0.1",
+        "SendIP": "0.0.0.0",
+        "DeviceOnlineMinTraffic": 0,
+        "ReportMinTraffic": 0,
+        "CertConfig": {
+          "CertMode": "file",
+          "CertDomain": "audit-node.example",
+          "CertFile": "/etc/V2bX-audit-test/tls.crt",
+          "KeyFile": "/etc/V2bX-audit-test/tls.key"
+        }
+      }
+    }
+  ]
+}

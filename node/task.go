@@ -78,6 +78,16 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		return nil
 	}
 	if newN != nil {
+		var added, deleted []panel.UserInfo
+		if newU != nil {
+			deleted, added = compareUserList(c.userList, newU)
+			if len(deleted) > 0 {
+				if err = c.server.DelUsers(deleted, c.tag, c.info); err != nil {
+					log.WithField("tag", c.tag).WithError(err).Error("Delete removed users before node reload failed")
+					return nil
+				}
+			}
+		}
 		c.info = newN
 		// nodeInfo changed
 		if newU != nil {
@@ -97,12 +107,15 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 
 		// Update limiter
 		if len(c.Options.Name) == 0 {
+			oldTag := c.tag
 			c.tag = c.buildNodeTag(newN)
 			// Remove Old limiter
-			limiter.DeleteLimiter(c.tag)
+			limiter.DeleteLimiter(oldTag)
 			// Add new Limiter
 			l := limiter.AddLimiter(c.tag, &c.LimitConfig, c.userList, newA)
 			c.limiter = l
+		} else if newU != nil {
+			c.limiter.UpdateUser(c.tag, added, deleted)
 		}
 		// update alive list
 		if newA != nil {
@@ -159,11 +172,13 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		}
 		if c.userReportPeriodic.Interval != newN.PushInterval &&
 			newN.PushInterval != 0 {
-			c.userReportPeriodic.Interval = newN.PullInterval
+			c.userReportPeriodic.Interval = newN.PushInterval
 			c.userReportPeriodic.Close()
 			_ = c.userReportPeriodic.Start(false)
 		}
 		log.WithField("tag", c.tag).Infof("Added %d new users", len(c.userList))
+		c.refreshSecurityAuditUsers()
+		c.refreshSecurityAuditLegacyRules()
 		// exit
 		return nil
 	}
@@ -172,7 +187,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		c.limiter.AliveList = newA
 	}
 	// node no changed, check users
-	if len(newU) == 0 {
+	if newU == nil {
 		return nil
 	}
 	deleted, added := compareUserList(c.userList, newU)
@@ -220,6 +235,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		}
 	}
 	c.userList = newU
+	c.refreshSecurityAuditUsers()
 	if len(added)+len(deleted) != 0 {
 		log.WithField("tag", c.tag).
 			Infof("%d user deleted, %d user added", len(deleted), len(added))

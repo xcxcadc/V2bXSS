@@ -87,6 +87,11 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 		}
 	}
 	c.userEtag = r.Header().Get("ETag")
+	// nil exclusively means HTTP 304/no new snapshot. A valid empty full
+	// snapshot must revoke the final expired/exhausted user on this node.
+	if userlist.Users == nil {
+		userlist.Users = make([]UserInfo, 0)
+	}
 	return userlist.Users, nil
 }
 

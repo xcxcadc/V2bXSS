@@ -4,13 +4,16 @@ import (
 	"strings"
 
 	"github.com/InazumaV/V2bX/api/panel"
+	"github.com/InazumaV/V2bX/common/format"
 	"github.com/InazumaV/V2bX/conf"
+	"github.com/InazumaV/V2bX/limiter"
 	"github.com/apernet/hysteria/core/v2/server"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
 type Hysteria2node struct {
+	Auth          *V2bX
 	Hy2server     server.Server
 	Tag           string
 	Logger        *zap.Logger
@@ -33,6 +36,7 @@ func (h *Hysteria2) AddNode(tag string, info *panel.NodeInfo, config *conf.Optio
 		}
 	}
 	n := Hysteria2node{
+		Auth:   &V2bX{usersMap: make(map[string]int)},
 		Tag:    tag,
 		Logger: h.Logger,
 		EventLogger: &serverLogger{
@@ -50,7 +54,24 @@ func (h *Hysteria2) AddNode(tag string, info *panel.NodeInfo, config *conf.Optio
 	if err != nil {
 		return err
 	}
-	hyconfig.Authenticator = h.Auth
+	hyconfig.Authenticator = n.Auth
+	// Account eligibility is mandatory and independent of optional audit policy.
+	if filter, ok := hyconfig.RequestFilter.(*auditRequestFilter); ok {
+		filter.authorized = func(uuid string) bool {
+			n.Auth.mutex.RLock()
+			_, active := n.Auth.usersMap[uuid]
+			n.Auth.mutex.RUnlock()
+			if !active {
+				return false
+			}
+			lim, err := limiter.GetLimiter(tag)
+			if err != nil {
+				return false
+			}
+			_, active = lim.UserLimitInfo.Load(format.UserTag(tag, uuid))
+			return active
+		}
+	}
 	s, err := server.NewServer(hyconfig)
 	if err != nil {
 		return err

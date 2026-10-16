@@ -17,17 +17,18 @@ import (
 // Panel is the interface for different panel's api.
 
 type Client struct {
-	client           *resty.Client
-	APIHost          string
-	APISendIP        string
-	Token            string
-	NodeType         string
-	NodeId           int
-	nodeEtag         string
-	userEtag         string
-	responseBodyHash string
-	UserList         *UserListBody
-	AliveMap         *AliveMap
+	client                 *resty.Client
+	APIHost                string
+	APISendIP              string
+	Token                  string
+	NodeType               string
+	NodeId                 int
+	SecurityAuditCachePath string
+	nodeEtag               string
+	userEtag               string
+	responseBodyHash       string
+	UserList               *UserListBody
+	AliveMap               *AliveMap
 }
 
 func New(c *conf.ApiConfig) (*Client, error) {
@@ -36,7 +37,7 @@ func New(c *conf.ApiConfig) (*Client, error) {
 		client = resty.NewWithLocalAddr(&net.TCPAddr{
 			IP: net.ParseIP(c.APISendIP),
 		})
-	} else {	
+	} else {
 		client = resty.New()
 	}
 	client.SetRetryCount(3)
@@ -78,13 +79,14 @@ func New(c *conf.ApiConfig) (*Client, error) {
 		"token":     c.Key,
 	})
 	return &Client{
-		client:    client,
-		Token:     c.Key,
-		APIHost:   c.APIHost,
-		APISendIP: c.APISendIP,
-		NodeType:  c.NodeType,
-		NodeId:    c.NodeID,
-		UserList:  &UserListBody{},
-		AliveMap:  &AliveMap{},
+		client:                 client,
+		Token:                  c.Key,
+		APIHost:                c.APIHost,
+		APISendIP:              c.APISendIP,
+		NodeType:               c.NodeType,
+		NodeId:                 c.NodeID,
+		SecurityAuditCachePath: c.SecurityAuditCachePath,
+		UserList:               &UserListBody{},
+		AliveMap:               &AliveMap{},
 	}, nil
 }

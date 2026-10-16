@@ -9,6 +9,7 @@ import (
 	"github.com/InazumaV/V2bX/conf"
 	vCore "github.com/InazumaV/V2bX/core"
 	"github.com/InazumaV/V2bX/limiter"
+	"github.com/InazumaV/V2bX/securityaudit"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -26,6 +27,8 @@ type Controller struct {
 	renewCertPeriodic         *task.Task
 	dynamicSpeedLimitPeriodic *task.Task
 	onlineIpReportPeriodic    *task.Task
+	securityAudit             *securityaudit.Agent
+	securityAuditTag          string
 	*conf.Options
 }
 
@@ -93,12 +96,17 @@ func (c *Controller) Start() error {
 	}
 	log.WithField("tag", c.tag).Infof("Added %d new users", added)
 	c.info = node
+	c.startSecurityAudit()
 	c.startTasks(node)
 	return nil
 }
 
 // Close implement the Close() function of the service interface
 func (c *Controller) Close() error {
+	if c.securityAudit != nil {
+		securityaudit.Unregister(c.securityAuditTag)
+		c.securityAudit.Close()
+	}
 	limiter.DeleteLimiter(c.tag)
 	if c.nodeInfoMonitorPeriodic != nil {
 		c.nodeInfoMonitorPeriodic.Close()

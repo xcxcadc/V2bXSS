@@ -1,5 +1,12 @@
 # V2bX
 
+本分支包含可选的节点安全审计二开。构建、隔离安装、测试范围和已知限制见
+[二开部署与验收说明](securityaudit/DEPLOYMENT.md) 和
+[审计协议及内核能力](securityaudit/README.md)。下方原版一键安装命令下载上游发行版，
+不会安装本分支的二开功能；本分支的 `V2bX update` 已阻断上游覆盖更新。
+本分支的离线构建、隔离测试安装和回滚入口在
+[tools/packaging](tools/packaging/README.zh-CN.md)，默认只校验，不写入或启动。
+
 [![](https://img.shields.io/badge/TgChat-UnOfficialV2Board%E4%BA%A4%E6%B5%81%E7%BE%A4-green)](https://t.me/unofficialV2board)
 [![](https://img.shields.io/badge/TgChat-YuzukiProjects%E4%BA%A4%E6%B5%81%E7%BE%A4-blue)](https://t.me/YuzukiProjects)
 
@@ -44,7 +51,7 @@ A V2board node server based on multi core, modified from XrayR.
 
 ## 软件安装
 
-### 一键安装
+### 上游原版一键安装（不包含本分支二开）
 
 ```
 wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh && bash install.sh

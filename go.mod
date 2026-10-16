@@ -4,6 +4,9 @@ go 1.25
 
 toolchain go1.25.0
 
+// Pinned upstream core plus optional authenticated defensive request filter.
+replace github.com/apernet/hysteria/core/v2 => ./third_party/hysteria-core
+
 require (
 	github.com/apernet/hysteria/core/v2 v2.6.4
 	github.com/apernet/hysteria/extras/v2 v2.6.4

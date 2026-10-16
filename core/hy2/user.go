@@ -1,6 +1,7 @@
 package hy2
 
 import (
+	"fmt"
 	"net"
 	"sync"
 
@@ -27,14 +28,18 @@ func (v *V2bX) Authenticate(addr net.Addr, auth string, tx uint64) (ok bool, id 
 }
 
 func (h *Hysteria2) AddUsers(p *vCore.AddUsersParams) (added int, err error) {
+	node, ok := h.Hy2nodes[p.Tag]
+	if !ok || node.Auth == nil {
+		return 0, fmt.Errorf("native hy2 node not found")
+	}
 	var wg sync.WaitGroup
 	for _, user := range p.Users {
 		wg.Add(1)
 		go func(u panel.UserInfo) {
 			defer wg.Done()
-			h.Auth.mutex.Lock()
-			h.Auth.usersMap[u.Uuid] = u.Id
-			h.Auth.mutex.Unlock()
+			node.Auth.mutex.Lock()
+			node.Auth.usersMap[u.Uuid] = u.Id
+			node.Auth.mutex.Unlock()
 		}(user)
 	}
 	wg.Wait()
@@ -42,6 +47,10 @@ func (h *Hysteria2) AddUsers(p *vCore.AddUsersParams) (added int, err error) {
 }
 
 func (h *Hysteria2) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeInfo) error {
+	node, ok := h.Hy2nodes[tag]
+	if !ok || node.Auth == nil {
+		return fmt.Errorf("native hy2 node not found")
+	}
 	var wg sync.WaitGroup
 	for _, user := range users {
 		wg.Add(1)
@@ -51,9 +60,12 @@ func (h *Hysteria2) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeIn
 		}
 		go func(u panel.UserInfo) {
 			defer wg.Done()
-			h.Auth.mutex.Lock()
-			delete(h.Auth.usersMap, u.Uuid)
-			h.Auth.mutex.Unlock()
+			node.Auth.mutex.Lock()
+			delete(node.Auth.usersMap, u.Uuid)
+			node.Auth.mutex.Unlock()
+			if revoker, ok := node.Hy2server.(interface{ DisconnectUser(string) }); ok {
+				revoker.DisconnectUser(u.Uuid)
+			}
 		}(user)
 	}
 	wg.Wait()
@@ -62,11 +74,12 @@ func (h *Hysteria2) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeIn
 
 func (h *Hysteria2) GetUserTrafficSlice(tag string, reset bool) ([]panel.UserTraffic, error) {
 	trafficSlice := make([]panel.UserTraffic, 0)
-	h.Auth.mutex.RLock()
-	defer h.Auth.mutex.RUnlock()
-	if _, ok := h.Hy2nodes[tag]; !ok {
+	node, ok := h.Hy2nodes[tag]
+	if !ok || node.Auth == nil {
 		return nil, nil
 	}
+	node.Auth.mutex.RLock()
+	defer node.Auth.mutex.RUnlock()
 	hook := h.Hy2nodes[tag].TrafficLogger.(*HookServer)
 	if v, ok := hook.Counter.Load(tag); ok {
 		c := v.(*counter.TrafficCounter)
@@ -77,15 +90,15 @@ func (h *Hysteria2) GetUserTrafficSlice(tag string, reset bool) ([]panel.UserTra
 			down := traffic.DownCounter.Load()
 			if up+down > hook.ReportMinTrafficBytes {
 				if reset {
-					traffic.UpCounter.Store(0)
-					traffic.DownCounter.Store(0)
+					up = traffic.UpCounter.Swap(0)
+					down = traffic.DownCounter.Swap(0)
 				}
-				if h.Auth.usersMap[uuid] == 0 {
+				if node.Auth.usersMap[uuid] == 0 {
 					c.Delete(uuid)
 					return true
 				}
 				trafficSlice = append(trafficSlice, panel.UserTraffic{
-					UID:      h.Auth.usersMap[uuid],
+					UID:      node.Auth.usersMap[uuid],
 					Upload:   up,
 					Download: down,
 				})

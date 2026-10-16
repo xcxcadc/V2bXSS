@@ -10,6 +10,7 @@ import (
 	"github.com/InazumaV/V2bX/common/rate"
 
 	"github.com/InazumaV/V2bX/limiter"
+	"github.com/InazumaV/V2bX/securityaudit"
 
 	"github.com/InazumaV/V2bX/common/counter"
 	"github.com/sagernet/sing-box/adapter"
@@ -45,6 +46,10 @@ func (h *HookServer) RoutedConnection(_ context.Context, conn net.Conn, m adapte
 	if l != nil {
 		destStr := m.Destination.AddrString()
 		protocol := m.Protocol
+		if securityaudit.CheckEndpoint(m.Inbound, m.User, destStr, m.Domain, m.Destination.Port, protocol) {
+			conn.Close()
+			return conn
+		}
 		if l.CheckDomainRule(destStr) {
 			log.Error(fmt.Sprintf(
 				"User %s access domain %s reject by rule",
@@ -93,6 +98,12 @@ func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn
 	if l != nil {
 		destStr := m.Destination.AddrString()
 		protocol := m.Destination.Network()
+		// Use the detected application protocol for the new audit engine, not
+		// the transport name (udp). Preserve the legacy limiter's behavior.
+		if securityaudit.CheckEndpoint(m.Inbound, m.User, destStr, m.Domain, m.Destination.Port, m.Protocol) {
+			conn.Close()
+			return conn
+		}
 		if l.CheckDomainRule(destStr) {
 			log.Error(fmt.Sprintf(
 				"User %s access domain %s reject by rule",

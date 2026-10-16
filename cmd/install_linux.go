@@ -14,11 +14,9 @@ var targetVersion string
 var (
 	updateCommand = cobra.Command{
 		Use:   "update",
-		Short: "Update V2bX version",
-		Run: func(_ *cobra.Command, _ []string) {
-			exec.RunCommandStd("bash",
-				"<(curl -Ls https://raw.githubusercontents.com/InazumaV/V2bX-script/master/install.sh)",
-				targetVersion)
+		Short: "Show safe update guidance for this audit build",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return fmt.Errorf("automatic upstream update is disabled for this custom audit build: it would overwrite the audit extension; build and verify your fork artifact, then use its isolated installer/update instructions")
 		},
 		Args: cobra.NoArgs,
 	}

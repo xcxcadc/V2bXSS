@@ -16,3 +16,11 @@ output/*
 .idea/*
 newV2bX.sh
 quic_singbox.sh
+
+# Local custom-audit build products and private runtime material.
+/V2bX-audit-linux-amd64
+/hy2-audit-probe-linux-amd64
+/node/cert/
+/private/
+/.private/
+*.audit-cache.json

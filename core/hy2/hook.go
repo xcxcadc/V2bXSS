@@ -36,7 +36,12 @@ func (h *HookServer) LogTraffic(id string, tx, rx uint64) (ok bool) {
 	}
 
 	userLimit, ok := limiterinfo.UserLimitInfo.Load(format.UserTag(h.Tag, id))
-	if ok {
+	if !ok {
+		// The panel revoked this user (quota exhausted, expired or removed).
+		// Returning false makes the native core close the authenticated QUIC
+		// connection, including all already-established TCP/UDP streams.
+		return false
+	} else {
 		userlimitInfo := userLimit.(*limiter.UserLimitInfo)
 		if userlimitInfo.OverLimit {
 			userlimitInfo.OverLimit = false
@@ -45,8 +50,7 @@ func (h *HookServer) LogTraffic(id string, tx, rx uint64) (ok bool) {
 	}
 
 	if c, exists = h.Counter.Load(h.Tag); !exists {
-		c = counter.NewTrafficCounter()
-		h.Counter.Store(h.Tag, c)
+		c, _ = h.Counter.LoadOrStore(h.Tag, counter.NewTrafficCounter())
 	}
 
 	if tc, ok := c.(*counter.TrafficCounter); ok {
