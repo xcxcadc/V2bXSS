@@ -51,6 +51,7 @@ type Report struct {
 	Dropped        uint64          `json:"dropped"`
 	SyncError      string          `json:"sync_error,omitempty"`
 	LegacyRules    *[]LegacyRule   `json:"legacy_rules,omitempty"`
+	LocalRuleList  *LocalRuleList  `json:"local_rulelist,omitempty"`
 }
 
 // LegacyRule inventories existing panel route blocks without changing them or
@@ -88,19 +89,20 @@ type userSnapshot map[string]int
 // Agent owns an independent worker/queue; connection hooks never wait for disk
 // or HTTP. When the queue is full, auditing drops events, not node traffic.
 type Agent struct {
-	engine    Engine
-	client    Client
-	options   Options
-	users     atomic.Pointer[userSnapshot]
-	legacy    atomic.Pointer[legacySnapshot]
-	mu        sync.Mutex
-	queue     []Event
-	dropped   atomic.Uint64
-	sequence  atomic.Uint64
-	prefix    string
-	lastError atomic.Pointer[string]
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
+	engine     Engine
+	client     Client
+	options    Options
+	users      atomic.Pointer[userSnapshot]
+	legacy     atomic.Pointer[legacySnapshot]
+	localRules atomic.Pointer[LocalRuleList]
+	mu         sync.Mutex
+	queue      []Event
+	dropped    atomic.Uint64
+	sequence   atomic.Uint64
+	prefix     string
+	lastError  atomic.Pointer[string]
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
 }
 
 func NewAgent(client Client, o Options) *Agent {
@@ -271,6 +273,7 @@ func (a *Agent) capabilities() map[string]bool {
 		"native_hy2_port":                 a.options.Core == "hysteria2",
 		"account_punishment":              false,
 		"legacy_rule_inventory":           true,
+		"local_rulelist_inventory":        true,
 	}
 }
 
@@ -298,6 +301,10 @@ func (a *Agent) flush(parent context.Context) {
 		if legacy.error != "" {
 			r.SyncError = strings.TrimSpace(r.SyncError + " " + legacy.error)
 		}
+	}
+	if local := a.localRules.Load(); local != nil {
+		copy := cloneLocalRuleList(*local)
+		r.LocalRuleList = &copy
 	}
 	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
 	defer cancel()

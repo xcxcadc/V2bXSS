@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/InazumaV/V2bX/limiter"
 	"github.com/InazumaV/V2bX/securityaudit"
 	"github.com/apernet/hysteria/core/v2/server"
 )
@@ -16,7 +17,15 @@ type auditRequestFilter struct {
 	authorized func(string) bool
 }
 
-func (f *auditRequestFilter) Version() string { return securityaudit.Version(f.tag) }
+func (f *auditRequestFilter) Version() string {
+	version := securityaudit.Version(f.tag)
+	if l, err := limiter.GetLimiter(f.tag); err == nil {
+		if local := l.LocalRuleVersion(); local != "" {
+			return version + ":local:" + local
+		}
+	}
+	return version
+}
 
 func (f *auditRequestFilter) ValidateUser(id string) bool {
 	return f.authorized == nil || f.authorized(id)
@@ -38,6 +47,9 @@ func (f *auditRequestFilter) CheckRequest(id, transport, reqAddr string) error {
 	// It does not supply a detected app protocol; never label UDP as QUIC.
 	if securityaudit.Check(f.tag, id, host, uint16(port), "") {
 		return errors.New("target rejected by security rule")
+	}
+	if l, err := limiter.GetLimiter(f.tag); err == nil && l.CheckLocalDomainRule(host) {
+		return errors.New("target rejected by local domain rule")
 	}
 	return nil
 }

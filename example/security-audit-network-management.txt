@@ -1,0 +1,12 @@
+# 普通网络管理规则示例；文件本身不自动加载、不默认启用。
+# 在后台批量预览，选择测试节点并先以停用/观察模式导入。
+# 矿池：匹配主域及其子域；不是完整的挖矿检测库。
+domain:antpool.com
+domain:f2pool.com
+domain:sparkpool.com
+domain:ethermine.org
+domain:nanopool.org
+# SMTP 直投端口；启用阻断也会影响合法的邮件直投。
+port:25
+# 仅在有应用协议识别能力的内核中可用；原生 HY2 不支持此项。
+protocol:bittorrent

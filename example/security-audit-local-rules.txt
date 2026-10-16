@@ -1,0 +1,3 @@
+# Optional local native regex list. This file is not loaded automatically.
+# RuleListPath selects the file; RuleListEnforce defaults to false (inventory only).
+(^|\.)malware\.example$

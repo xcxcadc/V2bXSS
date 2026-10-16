@@ -50,6 +50,7 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 }
 
 func (c *Controller) nodeInfoMonitor() (err error) {
+	c.refreshLocalRuleList()
 	// get node info
 	newN, err := c.apiClient.GetNodeInfo()
 	if err != nil {
@@ -78,6 +79,12 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		return nil
 	}
 	if newN != nil {
+		// Validate the entire merged policy before removing any running node or
+		// user. Invalid panel regexps keep the previous valid service intact.
+		if err = limiter.ValidateNativeRules(&newN.Rules, c.activeLocalPatterns()); err != nil {
+			log.WithField("tag", c.tag).WithError(err).Error("Invalid native rules; retained running node")
+			return nil
+		}
 		var added, deleted []panel.UserInfo
 		if newU != nil {
 			deleted, added = compareUserList(c.userList, newU)
@@ -122,7 +129,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			c.limiter.AliveList = newA
 		}
 		// Update rule
-		err = c.limiter.UpdateRule(&newN.Rules)
+		err = c.limiter.UpdateNativeRules(&newN.Rules, c.activeLocalPatterns())
 		if err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,

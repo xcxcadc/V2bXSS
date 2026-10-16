@@ -24,6 +24,8 @@ type Client struct {
 	NodeType               string
 	NodeId                 int
 	SecurityAuditCachePath string
+	RuleListPath           string
+	RuleListEnforce        bool
 	nodeEtag               string
 	userEtag               string
 	responseBodyHash       string
@@ -86,6 +88,8 @@ func New(c *conf.ApiConfig) (*Client, error) {
 		NodeType:               c.NodeType,
 		NodeId:                 c.NodeID,
 		SecurityAuditCachePath: c.SecurityAuditCachePath,
+		RuleListPath:           c.RuleListPath,
+		RuleListEnforce:        c.RuleListEnforce,
 		UserList:               &UserListBody{},
 		AliveMap:               &AliveMap{},
 	}, nil

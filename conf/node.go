@@ -31,6 +31,8 @@ type ApiConfig struct {
 	NodeType     string `json:"NodeType"`
 	Timeout      int    `json:"Timeout"`
 	RuleListPath string `json:"RuleListPath"`
+	// Local files are inventory-only unless enforcement is explicitly enabled.
+	RuleListEnforce bool `json:"RuleListEnforce"`
 	// Optional last-valid audit configuration; use a unique file per node.
 	SecurityAuditCachePath string `json:"SecurityAuditCachePath"`
 }

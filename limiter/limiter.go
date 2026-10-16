@@ -2,9 +2,9 @@ package limiter
 
 import (
 	"errors"
-	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/InazumaV/V2bX/api/panel"
@@ -21,8 +21,7 @@ func Init() {
 }
 
 type Limiter struct {
-	DomainRules   []*regexp.Regexp
-	ProtocolRules []string
+	nativeRules   atomic.Pointer[nativeRuleSnapshot]
 	SpeedLimit    int
 	UserOnlineIP  *sync.Map      // Key: TagUUID, value: {Key: Ip, value: Uid}
 	OldUserOnline *sync.Map      // Key: Ip, value: Uid

@@ -1,6 +1,7 @@
 # 节点安全审计二开：构建、隔离部署与验收
 
 本目录记录节点端实现；后台页面、权限及审计 API 需要配套面板代码。
+日常安装、规则导入、来源区分与重启条件见 [中文使用说明](../docs/USAGE.zh-CN.md)。
 本分支不新增 TG 菜单并保留既有交互。
 只安装本节点二进制不会创建后台菜单。节点连接适配的后台后会自动拉取可选审计策略，
 无需逐台手写规则。旧后台缺少审计接口时节点正常服务，审计功能不启用。
@@ -14,6 +15,8 @@
 - 无效策略或接口故障保留最近有效策略；可按节点配置独立缓存文件以跨重启恢复。
 - 证据队列有界，满载时丢弃证据并报告数量；重试使用稳定事件 ID。
 - 原有面板路由规则保持原样，以只读清单去重上报。它们不会被静默迁移成新规则。
+- `RuleListPath` 本地文件另行只读上报；默认不执行，须显式设置 `RuleListEnforce`
+  才阻断。本地规则更新在原节点拉取周期检查，非法更新保留最后有效版本。
 
 没有导入外部政治、宗教或新闻站点名单，也没有实现全浏览历史调查。
 XrayR 的任意路由/正则配置不等同于本功能的可移植安全规则，不能声称完全兼容。
@@ -44,7 +47,7 @@ XrayR 的任意路由/正则配置不等同于本功能的可移植安全规则�
 GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
   -tags 'xray sing hysteria2 with_quic with_utls with_gvisor with_wireguard with_acme' \
   -trimpath \
-  -ldflags='-s -w -X github.com/InazumaV/V2bX/cmd.version=AuditTest-20261016-r2' \
+  -ldflags='-s -w -X github.com/InazumaV/V2bX/cmd.version=AuditTest-20261016-r3' \
   -o V2bX-audit-linux-amd64 .
 sha256sum V2bX-audit-linux-amd64
 ```
@@ -54,8 +57,8 @@ sha256sum V2bX-audit-linux-amd64
 
 ## 隔离安装
 
-原版 README 的一键脚本下载上游发行版，**不包含本分支二开**。本分支已禁用
-`V2bX update`，避免被上游脚本覆盖。源码仓库提供
+本仓库首页安装命令改用自己的 [`install.sh`](../install.sh)，从固定提交构建二开，
+不调用上游安装器。本分支已禁用 `V2bX update`，避免被上游脚本覆盖。源码仓库另提供
 [`tools/packaging`](../tools/packaging/README.zh-CN.md) 离线构建、隔离测试安装和回滚工具。
 安装/回滚默认只校验，显式 `--apply` 才写入，另加 `--start` 才启动；没有可直接覆盖
 任意既有服务的通用迁移器。构建包包含版本和工作树哈希，安装校验二进制及完整清单。
@@ -84,12 +87,12 @@ sha256sum V2bX-audit-linux-amd64
 ```sh
 GOEXPERIMENT=jsonv2 go test \
   -tags 'xray sing hysteria2 with_quic with_utls with_gvisor with_wireguard with_acme' \
-  ./securityaudit ./api/panel ./node ./core/hy2 ./tools/hy2-audit-probe \
-  -run 'Test(Rule|Sniffed|Portable|Invalid|Observe|Atomic|Legacy|Bounded|NoUnmatched|Permanent|Batch|ConfigOutage|LastValid|Native|SecurityAudit|UserListEmpty|EmptyUser|EmptySnapshot|ReportCadence|TrafficRevocation|ConcurrentNative|Probe|AccountClosure|Revocation)' \
+  ./limiter ./securityaudit ./api/panel ./node ./core/hy2 ./tools/hy2-audit-probe \
+  -run 'Test(Rule|Sniffed|Portable|Invalid|Observe|Atomic|Legacy|Bounded|NoUnmatched|Permanent|Batch|ConfigOutage|LastValid|Native|LocalRuleList|SecurityAudit|UserListEmpty|EmptyUser|EmptySnapshot|ReportCadence|TrafficRevocation|ConcurrentNative|Probe|AccountClosure|Revocation)' \
   -count=1
 GOEXPERIMENT=jsonv2 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go vet \
   -tags 'xray sing hysteria2 with_quic with_utls with_gvisor with_wireguard with_acme' \
-  ./securityaudit ./api/panel ./node ./core/hy2 ./tools/hy2-audit-probe ./core/xray/... ./core/sing
+  ./limiter ./securityaudit ./api/panel ./node ./core/hy2 ./tools/hy2-audit-probe ./core/xray/... ./core/sing
 go test github.com/apernet/hysteria/core/v2/server -count=1
 go vet github.com/apernet/hysteria/core/v2/server
 ```
@@ -120,8 +123,9 @@ TCP 的明确审计拒绝才算阻断通过；UDP 超时必须结合匹配的后
 显式 `--apply` 才恢复，`--apply --start` 才启动旧版本。首次安装没有旧版本时只停止
 测试服务，保留文件和备份；回滚前还会保存当前配置检查点。
 
-尚未实现通用接管每个安装器的本地默认规则：现有面板 routes 清单为只读，
-本地 Xray/sing/HY2 静态配置尚未纳入后台删除和重载。不能将复制规则或删除副本描述为
+尚未实现通用接管每个安装器的本地默认规则：现有面板 routes 和本地 RuleList
+清单为只读，本地 Xray/sing/HY2 其他静态配置尚未纳入后台删除和重载。
+不能将复制规则或删除副本描述为
 已经删除节点原静态规则。真实客户端和全部协议的兼容性也不能由编译标签推定。
 
 ## 源码交付与许可证

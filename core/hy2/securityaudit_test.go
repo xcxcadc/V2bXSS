@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/InazumaV/V2bX/api/panel"
+	"github.com/InazumaV/V2bX/conf"
+	"github.com/InazumaV/V2bX/limiter"
 	"github.com/InazumaV/V2bX/securityaudit"
 )
 
@@ -12,6 +15,42 @@ type auditTestClient struct{}
 
 func (auditTestClient) FetchSecurityAudit(context.Context) (securityaudit.Config, error) {
 	return securityaudit.Config{Version: "test-v1", Enabled: true, Rules: []securityaudit.Rule{{ID: "r1", Type: "domain_exact", Value: "blocked.test", Action: "block"}}}, nil
+}
+
+func TestLocalRuleListNativeHy2SourceIsolationAndVersion(t *testing.T) {
+	limiter.Init()
+	tag := "local-rulelist-hy2"
+	l := limiter.AddLimiter(tag, &conf.LimitConfig{}, nil, nil)
+	defer limiter.DeleteLimiter(tag)
+	f := &auditRequestFilter{tag: tag}
+	p := &panel.Rules{Regexp: []string{`^panel\.invalid$`}, Protocol: []string{"tls"}}
+	if err := l.UpdateRule(p); err != nil {
+		t.Fatal(err)
+	}
+	initial := f.Version()
+	if err := f.CheckRequest("authenticated", "tcp", "panel.invalid:443"); err != nil {
+		t.Fatal("original unsupported HY2 panel routes were activated")
+	}
+	if err := l.UpdateNativeRules(p, []string{`^local\.invalid$`}); err != nil {
+		t.Fatal(err)
+	}
+	if f.Version() == initial {
+		t.Fatal("local policy update did not invalidate cached UDP decisions")
+	}
+	for _, network := range []string{"tcp", "udp"} {
+		if f.CheckRequest("authenticated", network, "local.invalid:443") == nil {
+			t.Fatalf("local %s target not blocked", network)
+		}
+		if err := f.CheckRequest("authenticated", network, "panel.invalid:443"); err != nil {
+			t.Fatal("source isolation lost")
+		}
+	}
+	if err := l.UpdateNativeRules(p, nil); err != nil {
+		t.Fatal(err)
+	}
+	if f.Version() != initial || f.CheckRequest("authenticated", "udp", "local.invalid:443") != nil {
+		t.Fatal("local clear did not release HY2 target")
+	}
 }
 func (auditTestClient) ReportSecurityAudit(context.Context, securityaudit.Report) error { return nil }
 

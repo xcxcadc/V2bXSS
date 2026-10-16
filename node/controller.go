@@ -29,6 +29,7 @@ type Controller struct {
 	onlineIpReportPeriodic    *task.Task
 	securityAudit             *securityaudit.Agent
 	securityAuditTag          string
+	localRules                *localRuleState
 	*conf.Options
 }
 
@@ -96,6 +97,7 @@ func (c *Controller) Start() error {
 	}
 	log.WithField("tag", c.tag).Infof("Added %d new users", added)
 	c.info = node
+	c.refreshLocalRuleList()
 	c.startSecurityAudit()
 	c.startTasks(node)
 	return nil

@@ -1,9 +1,72 @@
 # 隔离测试节点构建、安装与回滚
 
-这里的脚本安装本分支二开，不调用上游一键脚本，也不下载二进制或依赖。
+此目录的离线脚本安装本分支二开，不调用上游一键脚本，也不下载二进制或依赖。
 只管理 `V2bX-audit-test.service`，不管理现有 `V2bX.service`、`/etc/V2bX`、面板或数据库。
 安装和回滚默认都只校验并打印计划；必须显式 `--apply` 才写入，另加 `--start` 才启动。
 构建脚本会写入显式指定的新输出目录，不修改源目录。
+
+## 本仓库安装入口
+
+根目录 [install.sh](../../install.sh) 是 `xcxcadc/V2bXSS` 自己的安装入口，
+从完整提交 SHA 构建再调用本目录的隔离安装器，不假设存在预编译 Release，
+不会执行上游安装器或未校验的远端脚本管道。
+审计功能的使用见 [使用说明](../../docs/USAGE.zh-CN.md)。
+
+前提是已安装 Go、Git、GNU 工具。Go 需要满足选定源码 `go.mod` 的最低版本，
+并支持 `GOEXPERIMENT=jsonv2`（当前源码至少 Go 1.25）。
+不存在 Go、版本不足或不支持实验开关时，入口准确报错，不替换系统 Go，
+不使用 Go 的自动工具链下载。实际安装仍要求 Linux root、匹配架构及 systemd。
+
+推荐先从 `xcxcadc/V2bXSS` 的 `dev_new` 分支获取并审阅源码，记录完整提交 SHA：
+
+```sh
+git clone --branch dev_new --single-branch https://github.com/xcxcadc/V2bXSS.git V2bXSS
+cd V2bXSS
+commit=$(git rev-parse HEAD)
+git show --stat "$commit"
+bash install.sh --source "$PWD" --commit "$commit" \
+  --config /absolute/path/to/test-node.json --download-deps
+```
+
+`--source` 要求本地 checkout 根目录、HEAD 与 SHA 相符、工作树干净。
+入口在新临时目录取出该提交，保留源码和 bundle 路径，不复制未提交文件或真实配置。
+它先验证提交、Go 最低版本和依赖缓存，再执行已有离线构建与哈希校验。
+默认版本名是 `audit-<SHA前12位>`；可用 `--version` 指定新名称，目标可选 `--arch amd64|arm64`。
+
+默认安装阶段不写系统目录、不修改或启动服务；前面的源码准备和构建会写临时目录。
+`--download-deps` 明确允许 Go 模块下载，使用 `go.sum` 和公开校验服务验证依赖；
+省略时仅使用现有缓存，缺失会失败。网络代理由操作者使用 Git/Go 支持的环境变量配置，
+脚本不内置任何私有代理。请在同一依赖缓存环境下，使用 Linux root 明确安装并启动：
+
+```sh
+bash install.sh --source "$PWD" --commit "$commit" \
+  --config /absolute/path/to/test-node.json --apply --start
+```
+
+已取得并审阅入口脚本时，也可不提供 `--source`，由脚本只从自己的仓库拉取指定完整提交：
+
+```sh
+bash /absolute/path/to/reviewed/install.sh --commit '<可信的40位完整提交SHA>' \
+  --config /absolute/path/to/test-node.json --download-deps
+```
+
+分支名、短 SHA 和拉取结果不一致均会拒绝。此模式的默认计划仍需要下载源码和构建，
+只是不执行系统安装。入口脚本及指定提交都应来自操作者信任并审阅的版本；
+校验提交相等不等于自动证明任意代码安全。
+升级时选新提交并省略 `--config`，现有测试配置保留，已有版本目录拒绝覆盖。
+如果本机已有不同的测试 unit，安装器会拒绝，要求先审阅，不自动覆盖它。
+
+```sh
+bash install.sh status
+bash install.sh logs
+bash install.sh restart --apply
+bash install.sh stop --apply
+bash install.sh start --apply
+```
+
+状态和最近 100 条日志只读取 `V2bX-audit-test.service`；启动、重启和停止必须加 `--apply`。
+这些命令不管理原 `V2bX.service`，也没有卸载、删除备份或修改开机启动的隐式操作。
+**更换二进制需要一次明确重启；之后已支持的后台审计规则热更新无需重启节点。**
 
 ## 本地构建
 
@@ -78,12 +141,15 @@ bash /var/backups/v2bx-audit-test/<备份名>/rollback-test-node.sh \
 ## 尚未完成的边界
 
 安装器不接管每台节点安装时的 Xray 本地路由、sing 配置或 HY2 ACL。
-当前仅提供已有面板 `routes` 的只读清单；复制到新模块不代表接管原静态规则。
+当前提供已有面板 `routes` 和显式配置的 `RuleListPath` 本地文件的独立只读清单。
+后者默认只预览，显式开启 `RuleListEnforce` 才在支持内核执行；文件内容随原节点
+配置轮询热检查，不上传服务器路径。详见[本地规则说明](../../securityaudit/NATIVE-AUDIT.zh-CN.md)。
+这两种清单不能代表节点上全部静态规则；复制到新模块不代表接管原件。
 因此不能声称在新页面删除副本就删除了节点原默认规则。
 也没有完成全部入站协议、所有真实客户端、arm64 或生产支付链路的完整验收。
 本工具是隔离测试安装入口，不是可覆盖任意既有节点的一键迁移器。
 
-## 本轮工具验证
+## 工具验证
 
 已用真实离线构建脚本生成 Linux/amd64 bundle（Go 1.26.5），再在没有隔离服务的
 本地验证环境运行以下命令，13 项检查通过：
@@ -96,3 +162,16 @@ bash tools/packaging/test-packaging.sh --bundle /absolute/path/to/built-bundle
 组件篡改、清单路径穿越、非法回滚路径和无系统目录创建。夹具保留在输出的临时目录，
 测试不执行 `--apply`。真实 Linux root/systemd 安装/回滚尚未在本轮本地执行，
 不能把这些校验当成测试节点真实服务启动、数据上报或全部客户端的验收。
+
+根入口另有独立夹具测试：
+
+```sh
+bash tools/packaging/test-entrypoint.sh
+```
+
+本次本地 24 项入口检查通过，另复用原 13 项打包检查。
+入口夹具使用真实 Git 本地提交和真实 bundle 生成脚本，但替代了 Go 编译、远端下载、
+依赖下载和服务管理命令；`--apply` 只转发到模拟安装器，没有访问系统安装目录。
+覆盖固定自有仓库、完整提交比对、干净源码、Go/jsonv2/源码最低补丁版本、
+显式依赖下载、源码被依赖命令修改时拒绝、模式冲突以及固定测试服务管理。
+这些结果不能当成真实 Linux root/systemd 安装或真实节点接入测试。

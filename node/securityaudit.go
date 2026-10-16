@@ -20,6 +20,7 @@ func (c *Controller) startSecurityAudit() {
 	})
 	c.refreshSecurityAuditUsers()
 	c.refreshSecurityAuditLegacyRules()
+	c.refreshSecurityAuditLocalRules()
 	c.securityAudit.Start()
 }
 

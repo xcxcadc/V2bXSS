@@ -48,8 +48,12 @@ permanently stall later valid evidence.
 route blocks. It does not change those routes or silently import them. Inventory
 is bounded to 1000 entries/80 KiB encoded JSON and reports truncation. External
 Xray routing JSON/native Hysteria ACL files are not represented by this inventory.
-The upstream `RuleListPath` option is declared but not implemented by upstream;
-setting that option does not import a rule file.
+Upstream declared `RuleListPath` without reading it. This fork now reads an
+explicit local regex file as a separate, bounded `local_rulelist` inventory.
+`RuleListEnforce` defaults to false: configuring a path alone does not enable
+blocking. The inventory is read-only in the panel and never silently imports
+rules into the managed policy. See the [Chinese usage guide](../docs/USAGE.zh-CN.md)
+for reload timing, activation, failure handling and the separate native sources.
 
 ## Core coverage and limits
 
@@ -91,7 +95,8 @@ and retest that optional callback.
 
 ## Build and installation
 
-Chinese deployment and acceptance details: [DEPLOYMENT.md](DEPLOYMENT.md).
+Chinese usage and restart guidance: [USAGE.zh-CN.md](../docs/USAGE.zh-CN.md).
+Deployment and acceptance details: [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ```sh
 GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
@@ -99,7 +104,8 @@ GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
   -trimpath -ldflags='-s -w' -o V2bX-audit-linux-amd64 .
 ```
 
-The upstream one-line installer does not install this fork's extension. Use
+The fork's own source installer is [`install.sh`](../install.sh); the main
+[README](../README.md#软件安装) gives the pinned-source commands. Alternatively use
 the offline build, isolated installer and rollback tools in
 [`tools/packaging`](../tools/packaging/README.zh-CN.md). Install/rollback default
 to verification only; explicit `--apply` writes and `--start` starts the separate
