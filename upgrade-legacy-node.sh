@@ -207,8 +207,10 @@ if [[ -n "$rollback_dir" ]]; then
     backup_dir="$checkpoint"
     transaction=true
     stop_service
-    atomic_binary "$rollback_dir/V2bX"
+    # Arm restoration before rename so a signal immediately after replacement
+    # cannot leave the checkpoint bypassed by the EXIT handler.
     replaced=true
+    atomic_binary "$rollback_dir/V2bX"
     if [[ "$(<"$rollback_dir/service-state")" == true ]]; then start_service; stable_service || die '恢复的旧服务启动未稳定'; fi
     transaction=false
     printf '回滚完成；回滚前程序检查点：%s\n' "$checkpoint"
@@ -297,8 +299,8 @@ if $was_running; then stop_service; fi
 [[ "$(sha256sum "$legacy_binary" | awk '{print $1}')" == "$old_hash" ]] || die '原程序在构建期间被其他操作改变，已取消'
 chmod --reference="$legacy_binary" "$candidate"
 chown --reference="$legacy_binary" "$candidate"
-atomic_binary "$candidate"
 replaced=true
+atomic_binary "$candidate"
 if $was_running; then start_service; stable_service || die '新服务退出或发生重启，自动回滚'; fi
 transaction=false
 printf '升级完成；升级前运行：%s；配置与原服务定义未改写。\n备份：%s\n' "$was_running" "$backup_dir"

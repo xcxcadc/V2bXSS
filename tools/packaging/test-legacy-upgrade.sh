@@ -8,6 +8,7 @@ fixture="$(mktemp -d "${TMPDIR:-/tmp}/v2bxss-legacy-check.XXXXXXXX")"
 echo "Legacy upgrade fixture retained: $fixture"
 mkdir -p "$fixture/bin" "$fixture/source/tools/packaging" "$fixture/node" "$fixture/config"
 real_git="$(command -v git)"
+export LEGACY_REAL_MV="$(command -v mv)"
 export LEGACY_PYTHON="${LEGACY_PYTHON:-$(command -v python3 || command -v python)}"
 cp "$script_dir/configure-node.py" "$fixture/source/tools/packaging/"
 printf 'module fixture.invalid/test\n\ngo 1.25\n' > "$fixture/source/go.mod"
@@ -94,6 +95,16 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/flock"
 printf '#!/usr/bin/env bash\necho unexpected network >&2; exit 99\n' > "$fixture/bin/curl"
 # Git Bash has no chown; fixture does not need root ownership changes.
 printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/chown"
+cat > "$fixture/bin/mv" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+"$LEGACY_REAL_MV" "$@"
+target="${!#}"
+if [[ "${LEGACY_INTERRUPT_AFTER_SWAP:-0}" == 1 && "$target" == "$LEGACY_FIXTURE/node/V2bX" && ! -f "$LEGACY_FIXTURE/interrupted" ]] && grep -q audit- "$target"; then
+    touch "$LEGACY_FIXTURE/interrupted"
+    kill -TERM "$PPID"
+fi
+STUB
 chmod 0755 "$fixture/bin/"*
 export PATH="$fixture/bin:$PATH"
 reset_node() {
@@ -109,7 +120,7 @@ reset_node() {
     echo true > "$fixture/running"
     echo 0 > "$fixture/checks"
     : > "$fixture/actions"
-    rm -f "$fixture/new-running"
+    rm -f "$fixture/new-running" "$fixture/interrupted"
 }
 passed=0
 pass() { passed=$((passed+1)); echo "PASS: $1"; }
@@ -153,6 +164,13 @@ if LEGACY_RESTART_LOOP=1 upgrade > "$fixture/loop.log" 2>&1; then exit 1; fi
 cmp "$fixture/node/V2bX" "$fixture/original"
 [[ "$(<"$fixture/running")" == true ]]
 pass 'rapid service restart is rejected and rolled back'
+reset_node
+if LEGACY_INTERRUPT_AFTER_SWAP=1 upgrade > "$fixture/interrupted.log" 2>&1; then exit 1; fi
+test -f "$fixture/interrupted"
+cmp "$fixture/node/V2bX" "$fixture/original"
+[[ "$(<"$fixture/running")" == true ]]
+sha256sum --check "$fixture/preserved.sha" >/dev/null
+pass 'termination immediately after atomic replacement restores old binary and service'
 reset_node
 if LEGACY_BUILD_FAIL=1 upgrade > "$fixture/build-failed.log" 2>&1; then exit 1; fi
 cmp "$fixture/node/V2bX" "$fixture/original"
