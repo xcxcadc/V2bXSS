@@ -116,8 +116,28 @@ mv -Tf "$base_dir/current.next-$$" "$base_dir/current"
 systemctl daemon-reload
 printf 'Installed version: %s\nRollback preview: bash %q --backup %q\n' "$version" "$backup_dir/rollback-test-node.sh" "$backup_dir"
 if $start_service; then
-    systemctl restart V2bX-audit-test.service
-    systemctl is-active --quiet V2bX-audit-test.service || { echo "Test service did not stay active; inspect journal. Backup: $backup_dir" >&2; exit 1; }
+    stable_service() {
+        local i pid
+        for ((i=0; i<15; i++)); do
+            if systemctl is-active --quiet V2bX-audit-test.service; then break; fi
+            sleep 1
+        done
+        systemctl is-active --quiet V2bX-audit-test.service || return 1
+        pid=$(systemctl show V2bX-audit-test.service --property=MainPID --value)
+        [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+        for ((i=0; i<12; i++)); do
+            sleep 1
+            systemctl is-active --quiet V2bX-audit-test.service || return 1
+            [[ "$(systemctl show V2bX-audit-test.service --property=MainPID --value)" == "$pid" ]] || return 1
+        done
+    }
+    if ! systemctl restart V2bX-audit-test.service || ! stable_service; then
+        echo "Test service did not stay active; restoring the previous installation. Backup: $backup_dir" >&2
+        restore_args=()
+        if grep -Fxq active "$backup_dir/previous-service-state"; then restore_args+=(--start); fi
+        bash "$backup_dir/rollback-test-node.sh" --backup "$backup_dir" --apply "${restore_args[@]}" || echo 'Automatic rollback failed; inspect the printed backup and service journal.' >&2
+        exit 1
+    fi
 else
     echo 'Service was not started or restarted. A running process keeps its old binary until explicitly restarted.'
 fi

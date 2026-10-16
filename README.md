@@ -2,10 +2,9 @@
 
 本分支包含可选的节点安全审计二开。构建、隔离安装、测试范围和已知限制见
 [二开部署与验收说明](securityaudit/DEPLOYMENT.md) 和
-[审计协议及内核能力](securityaudit/README.md)。安装入口是本仓库的 `install.sh`，
-从指定提交构建本二开，不调用上游安装器，也不假设已有预编译 Release。
-本分支的 `V2bX update` 已阻断上游覆盖更新。安装只管理独立测试服务，
-默认构建、校验和打印计划；详细说明见 [tools/packaging](tools/packaging/README.zh-CN.md)。
+[审计协议及内核能力](securityaudit/README.md)。运行下面的一键命令打开中文菜单，
+选择安装或更新即可，自动准备依赖、Go 和节点配置，不需要手工 clone 或填写提交号。
+安装的是自己的二开版本；详细说明见 [tools/packaging](tools/packaging/README.zh-CN.md)。
 
 [![](https://img.shields.io/badge/TgChat-UnOfficialV2Board%E4%BA%A4%E6%B5%81%E7%BE%A4-green)](https://t.me/unofficialV2board)
 [![](https://img.shields.io/badge/TgChat-YuzukiProjects%E4%BA%A4%E6%B5%81%E7%BE%A4-blue)](https://t.me/YuzukiProjects)
@@ -54,46 +53,57 @@ A V2board node server based on multi core, modified from XrayR.
 
 ## 软件安装
 
-### 安装本二开：固定源码提交，先校验再安装
+### 已有原版节点：独立原位升级
 
-前提：Linux 主机、Git、GNU 工具，以及预先安装的 Go（不低于源码 `go.mod` 的版本，
-且支持 `GOEXPERIMENT=jsonv2`；当前源码至少 Go 1.25）。脚本不会安装或替换系统 Go。
-首次安装另需准备独立测试节点配置，使用单独节点 ID、监听端口和测试后台凭据。
-
-从自己的二开分支获取源码，审阅本地脚本并记录本次完整提交：
+已经通过 `wyx2685/V2bX-script` 安装的节点，使用这一条命令，**不要使用下面的新装入口**：
 
 ```sh
-git clone --branch dev_new --single-branch https://github.com/xcxcadc/V2bXSS.git V2bXSS
-cd V2bXSS
-commit=$(git rev-parse HEAD)
-git show --stat "$commit"
-bash install.sh --source "$PWD" --commit "$commit" \
-  --config /absolute/path/to/test-node.json --download-deps
+wget -N https://raw.githubusercontent.com/xcxcadc/V2bXSS/dev_new/upgrade-legacy-node.sh && bash upgrade-legacy-node.sh
 ```
 
-`--download-deps` 明确允许下载并校验 Go 依赖；已有完整缓存时省略它。
-上面会在打印的临时目录构建并保留安装包，但不会修改服务。
-确认计划后，在 Linux root 环境中执行（使用同一依赖缓存）：
+脚本自动构建本二开，只替换 `/usr/local/V2bX/V2bX`，保留 `/etc/V2bX` 全部配置、
+证书、混淆、节点端口、本地路由/geo 文件、服务定义和开机启动设置。
+沿用原 `V2bX.service` 或 OpenRC，不安装新服务。升级前备份到
+`/var/backups/v2bxss-legacy/<时间-版本-进程号>/` 并打印回滚命令。
+替换或启动失败自动恢复；原服务停止时保持停止。支持 Linux amd64/arm64。
+
+构建期间原节点继续运行，替换后重启一次，已有连接会短暂中断。
+脚本不修改面板累计流量；进程内尚未成功上报的增量仍受原版计数机制限制，不能承诺零损失。
+升级后应核对流量上报、在线统计和用户到期撤权。后续仍使用此脚本更新，
+不要从上游旧菜单执行更新/重装，否则可能覆盖二开。
+回滚方式及验证边界见[升级说明](tools/packaging/README.zh-CN.md#原版节点独立升级)。
+
+### 一键安装本二开（中文菜单）
+
+在 Linux 服务器用 root 执行：
 
 ```sh
-bash install.sh --source "$PWD" --commit "$commit" \
-  --config /absolute/path/to/test-node.json --apply --start
+wget -N https://raw.githubusercontent.com/xcxcadc/V2bXSS/dev_new/install.sh && bash install.sh
 ```
 
-只安装 `V2bX-audit-test.service`；现有 `V2bX.service`、配置及其他服务保留。
-升级使用新的 `--commit`，已有测试配置时省略 `--config`，同名版本拒绝覆盖。
-默认版本名取自提交 SHA，也可明确传 `--version`。安装前自动备份并打印确切回滚路径。
-更换二进制需重启一次服务；之后已支持的后台审计规则自动同步，无需为每条规则重启。
+运行后出现菜单，选择 **1. 安装 / 更新到最新二开版本**。
+首次安装按提示填写面板 API 地址、节点密钥、节点类型、节点 ID 和证书信息，
+也可以直接导入已有 JSON 配置。支持一次对接多个节点。
+程序自动下载依赖并编译，首次安装需要数分钟；不需要自行安装 Go。
+支持 Debian/Ubuntu、使用 dnf/yum 的发行版，Linux amd64/arm64 和 systemd。
+
+安装完成后，直接输入以下命令重新打开管理菜单：
 
 ```sh
-bash install.sh status
-bash install.sh logs
-bash install.sh restart --apply
+v2bxss
 ```
 
-这些管理命令仅针对独立测试服务；`start`、`restart`、`stop` 省略 `--apply` 时只打印计划。
-远端固定提交安装、离线包安装及回滚见 [完整安装说明](tools/packaging/README.zh-CN.md)。
-本入口不是覆盖现有节点的迁移器；不能把 `active` 视作所有协议及数据上报均已验收。
+菜单包含安装/更新、追加节点、导入配置、启停/重启、状态、日志、开机自启和回滚。
+以后更新仍选择 **1**，自动获取本仓库 `dev_new` 最新版本，完整保留现有配置、
+证书及混淆；已经是最新版时不重新编译。安装前自动备份并显示路径。
+
+本二开使用独立服务 `V2bX-audit-test.service` 和 `/etc/v2bx-audit-test/config.json`。
+若原有上游服务正在使用相同端口，应先处理端口冲突；菜单不会自动停掉上游服务。
+工具链安装在自己的目录，不替换系统 Go。高级固定提交/离线安装入口仍保留，见
+[完整安装说明](tools/packaging/README.zh-CN.md)。
+
+升级二进制会重启该二开服务一次；之后后台托管审计规则约 30 秒自动同步，
+不需要为每条规则登录服务器或重启所有节点。
 
 ## 构建
 ```sh

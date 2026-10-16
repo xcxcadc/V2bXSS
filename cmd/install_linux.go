@@ -16,7 +16,7 @@ var (
 		Use:   "update",
 		Short: "Show safe update guidance for this audit build",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return fmt.Errorf("automatic upstream update is disabled for this custom audit build: it would overwrite the audit extension; build and verify your fork artifact, then use its isolated installer/update instructions")
+			return fmt.Errorf("本二开不使用上游更新器；原版服务原位升级请使用本仓库 upgrade-legacy-node.sh，独立安装请运行 v2bxss 选择 1；两者均保留现有配置，详见仓库 README")
 		},
 		Args: cobra.NoArgs,
 	}

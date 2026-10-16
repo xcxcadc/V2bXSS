@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/apernet/hysteria/core/v2/server"
+	"github.com/apernet/hysteria/extras/v2/obfs"
 )
 
 type testAuth struct{}
@@ -59,10 +60,25 @@ func TestProbeRejectsNonLoopbackTargets(t *testing.T) {
 }
 
 func TestNativeProbeAllowedObservedBlockedHotRestoredTCPUDP(t *testing.T) {
+	testNativeProbe(t, "")
+}
+
+func TestNativeProbeSalamanderAllowedObservedBlockedHotRestoredTCPUDP(t *testing.T) {
+	testNativeProbe(t, "fixture-obfs-password")
+}
+
+func testNativeProbe(t *testing.T, password string) {
 	cert, caPath := testCert(t)
 	packet, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if password != "" {
+		obfuscator, err := obfs.NewSalamanderObfuscator([]byte(password))
+		if err != nil {
+			t.Fatal(err)
+		}
+		packet = obfs.WrapPacketConn(packet, obfuscator)
 	}
 	filter := &testFilter{}
 	srv, err := server.NewServer(&server.Config{Conn: packet, TLSConfig: server.TLSConfig{Certificates: []tls.Certificate{cert}}, Authenticator: testAuth{}, RequestFilter: filter})
@@ -100,7 +116,7 @@ func TestNativeProbeAllowedObservedBlockedHotRestoredTCPUDP(t *testing.T) {
 			_, _ = udp.WriteTo(data[:n], addr)
 		}
 	}()
-	cfg := config{Server: packet.LocalAddr().String(), Auth: "local-test-auth", TimeoutMS: 2000}
+	cfg := config{Server: packet.LocalAddr().String(), Auth: "local-test-auth", TimeoutMS: 2000, Obfs: password}
 	cfg.TLS.ServerName, cfg.TLS.CAFile = "probe.test", caPath
 	cli, udpEnabled, err := connect(cfg)
 	if err != nil || !udpEnabled {

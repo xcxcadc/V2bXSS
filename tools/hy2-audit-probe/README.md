@@ -13,6 +13,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' \
 ```
 
 Create a private config (mode 0600), replacing the test UUID locally:
+If the test node uses Salamander, add `"obfs_password": "REPLACE_LOCALLY"` at
+the top level. It is read only from the private file and is never printed.
 
 ```json
 {

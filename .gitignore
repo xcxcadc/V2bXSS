@@ -24,3 +24,4 @@ quic_singbox.sh
 /private/
 /.private/
 *.audit-cache.json
+__pycache__/

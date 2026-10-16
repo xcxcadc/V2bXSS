@@ -1,13 +1,56 @@
-# 隔离测试节点构建、安装与回滚
+# 一键菜单与高级构建、安装、回滚
 
+## 推荐：一键打开中文菜单
+
+```sh
+wget -N https://raw.githubusercontent.com/xcxcadc/V2bXSS/dev_new/install.sh && bash install.sh
+```
+
+使用 Linux root、systemd、amd64/arm64。菜单 1 安装/更新自己的二开，自动准备
+系统依赖、独立 Go 工具链和模块，固定本次取得的完整提交后构建。Go 官方下载使用
+官网发布的 SHA256 校验；模块使用 go.sum 和校验服务。首次编译需要数分钟及足够磁盘。
+工具链和构建缓存位于 `/opt/v2bx-audit-test/`，不替换系统 Go。
+
+首次可选择向导（面板、密钥、类型、ID、TLS）或导入 JSON；支持多节点。
+支持 vmess/vless/trojan/shadowsocks、hysteria1/2、tuic、anytls，向导按类型选择可用内核。
+TLS 可用已有文件或自动 HTTP 证书；后者要求域名已解析到本机且 80 端口可用。
+混淆、端口等面板下发参数仍由面板管理，不另建一份密码。
+
+安装后运行 `v2bxss` 打开相同菜单：
+
+| 选项 | 行为 |
+| --- | --- |
+| 1 | 安装/更新最新二开；已是最新提交则跳过编译；已有配置完整保留 |
+| 2 | 保留已有节点、证书、自定义选项并追加节点；拒绝重复节点 |
+| 3 | 导入替换 JSON，先备份；启动检查失败时恢复旧配置 |
+| 4/5/6 | 启动/停止/重启二开服务 |
+| 7/8 | 查看运行状态/最近 100 条日志，查看后返回菜单 |
+| 9 | 开启/关闭二开服务开机自启 |
+| 10 | 选取匹配当前版本的上一版备份，确认后回滚并重启 |
+| 0 | 退出 |
+
+菜单中的写入操作直接执行，无需再追加高级参数。安装成功自动开启开机自启。
+更新保留整个现有配置文件，包括带注释 JSON、外部 Include、证书和混淆配置；
+只有追加/导入向导需要可校验的标准 JSON，自定义 Include 可直接修改原配置。
+每次程序安装沿用下面的哈希校验、备份和独立服务路径。
+配置编辑备份另放在 `/var/backups/v2bx-audit-test/config-<UTC时间>-<PID>/config.json`。
+安装失败保留构建目录并显示错误，菜单不会因单次失败退出。
+
+升级程序重启本服务一次；后台托管规则约 30 秒热同步，无需为每条规则重启。
+菜单只管理 `V2bX-audit-test.service`，不自动接管上游服务或修改防火墙。
+如果原节点还占用相同端口，请先处理冲突，再启动二开。
+
+## 高级：固定提交和离线操作
+
+以下为可选的高级入口，不是日常一键安装的必做步骤。
 此目录的离线脚本安装本分支二开，不调用上游一键脚本，也不下载二进制或依赖。
 只管理 `V2bX-audit-test.service`，不管理现有 `V2bX.service`、`/etc/V2bX`、面板或数据库。
 安装和回滚默认都只校验并打印计划；必须显式 `--apply` 才写入，另加 `--start` 才启动。
 构建脚本会写入显式指定的新输出目录，不修改源目录。
 
-## 本仓库安装入口
+## 高级参数入口
 
-根目录 [install.sh](../../install.sh) 是 `xcxcadc/V2bXSS` 自己的安装入口，
+根目录 [install.sh](../../install.sh) 带参数调用时保留高级安装入口，
 从完整提交 SHA 构建再调用本目录的隔离安装器，不假设存在预编译 Release，
 不会执行上游安装器或未校验的远端脚本管道。
 审计功能的使用见 [使用说明](../../docs/USAGE.zh-CN.md)。
@@ -17,7 +60,7 @@
 不存在 Go、版本不足或不支持实验开关时，入口准确报错，不替换系统 Go，
 不使用 Go 的自动工具链下载。实际安装仍要求 Linux root、匹配架构及 systemd。
 
-推荐先从 `xcxcadc/V2bXSS` 的 `dev_new` 分支获取并审阅源码，记录完整提交 SHA：
+需要固定提交的自动化部署时，从 `dev_new` 获取并记录完整 SHA：
 
 ```sh
 git clone --branch dev_new --single-branch https://github.com/xcxcadc/V2bXSS.git V2bXSS
@@ -81,7 +124,8 @@ bash tools/packaging/build-local-bundle.sh \
 ```
 
 目标可选 `amd64` 或 `arm64`；当前真实构建验收为 Linux/amd64。
-构建标签包括 Xray、sing-box、原生 HY2 及已经验证的依赖选项，不含 `with_grpc`。
+构建标签包括 Xray、sing-box、原生 HY2、QUIC、完整 gRPC、uTLS、WireGuard、ACME 和 gVisor。
+本轮已验证包含 `with_grpc` 的 Linux/amd64 编译；这不等于每种协议已做真实客户端验收。
 成功输出包含二进制、安装/回滚脚本、独立 unit、`BUILD-INFO` 和 `SHA256SUMS`。
 `BUILD-INFO` 记录版本、提交、工具链及工作树哈希，不打包工作树内容或真实配置。
 记录终端输出的二进制和清单 SHA256，安装时从可信记录取得哈希；不要只信任随包附带的值。
@@ -147,7 +191,50 @@ bash /var/backups/v2bx-audit-test/<备份名>/rollback-test-node.sh \
 这两种清单不能代表节点上全部静态规则；复制到新模块不代表接管原件。
 因此不能声称在新页面删除副本就删除了节点原默认规则。
 也没有完成全部入站协议、所有真实客户端、arm64 或生产支付链路的完整验收。
-本工具是隔离测试安装入口，不是可覆盖任意既有节点的一键迁移器。
+本工具不自动覆盖任意既有上游节点；菜单和高级安装共用独立服务路径。
+
+## 原版节点独立升级
+
+原来由 `wyx2685/V2bX-script` 安装的节点使用独立入口：
+
+```sh
+wget -N https://raw.githubusercontent.com/xcxcadc/V2bXSS/dev_new/upgrade-legacy-node.sh && bash upgrade-legacy-node.sh
+```
+
+该脚本不会调用 `install.sh`，只替换 `/usr/local/V2bX/V2bX`，沿用原 systemd/OpenRC
+服务。`/etc/V2bX`、证书、混淆、端口、geo/路由文件、原管理器、启停和开机启动设置保持原样。
+需要 Linux amd64/arm64；缺少依赖和合适 Go 时自动准备，源码固定到获取时的完整提交号，
+工具链校验官方 SHA256，Go 模块保持校验。只检查原安装可以先运行：
+
+```sh
+bash upgrade-legacy-node.sh --dry-run
+```
+
+构建期间原服务持续运行。确认升级后，先把原程序、整个原安装/配置目录、服务定义及
+运行状态备份到 `/var/backups/v2bxss-legacy/<时间-版本-进程号>/`，再原位替换程序。
+运行中的服务重启一次并检查持续存活和 PID；停止状态不会擅自启动。替换/启动失败自动
+恢复旧程序及升级前状态。备份可能含密钥，权限为 root 私有，不能上传公开仓库。
+
+每次输出可直接复制的回滚命令，例如：
+
+```sh
+bash /var/backups/v2bxss-legacy/<备份名>/rollback.sh --rollback /var/backups/v2bxss-legacy/<备份名>
+```
+
+回滚校验旧/新二进制哈希，拒绝覆盖后来变化的程序，只恢复旧二进制及当时运行状态；
+不覆盖之后修改的配置。原始文件归档 `original-files.tar` 供人工恢复，不自动解压覆盖。
+升级和回滚会短暂中断连接，不能承诺进程内待报增量零损失。脚本不会修改数据库或面板
+累计流量。服务稳定只是一层检查，还要核对实际连接、节点回执、流量增量、在线统计和
+到期/流量用尽撤权。原 shell 管理器保留；不要使用其上游更新/重装功能覆盖二开。
+
+隔离夹具检查命令：
+
+```sh
+bash tools/packaging/test-legacy-upgrade.sh
+```
+
+夹具在临时目录做真实文件替换和备份，模拟编译器与服务管理器；覆盖配置/证书/路由保留、
+运行与停止状态、systemd/OpenRC、失败回滚、重启循环及过期备份拒绝。它不代替真实节点业务测试。
 
 ## 工具验证
 
@@ -175,3 +262,13 @@ bash tools/packaging/test-entrypoint.sh
 覆盖固定自有仓库、完整提交比对、干净源码、Go/jsonv2/源码最低补丁版本、
 显式依赖下载、源码被依赖命令修改时拒绝、模式冲突以及固定测试服务管理。
 这些结果不能当成真实 Linux root/systemd 安装或真实节点接入测试。
+
+菜单/配置向导另外运行：
+
+```sh
+bash tools/packaging/test-menu.sh
+python3 tools/packaging/test-configure-node.py
+```
+
+覆盖无需依赖打开菜单、失败返回、多内核节点配置、追加保留、重复校验、导入保留
+混淆及未知选项、密钥不回显、配置文件权限、Go 官方下载项选择及补丁版本比较。

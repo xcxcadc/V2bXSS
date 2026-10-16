@@ -6,9 +6,276 @@ umask 077
 repository='https://github.com/xcxcadc/V2bXSS.git'
 service='V2bX-audit-test.service'
 
+# The downloaded entry is self-contained: opening the menu needs no checkout,
+# Go installation, network request or root privileges.
+menu_base=/opt/v2bx-audit-test
+menu_config=/etc/v2bx-audit-test/config.json
+menu_branch=dev_new
+
+menu_require_host() {
+    need_linux_root
+    need_command systemctl
+    [[ -d /run/systemd/system ]] || die '需要使用 systemd 的 Linux 服务器'
+    case "$(uname -m)" in
+        x86_64) menu_arch=amd64 ;;
+        aarch64|arm64) menu_arch=arm64 ;;
+        *) die '当前支持 Linux amd64 / arm64' ;;
+    esac
+    for target in "$menu_base" "$menu_base/manager" "$menu_base/toolchains" /etc/v2bx-audit-test "$menu_config"; do
+        [[ ! -L "$target" ]] || die "安装路径不能是符号链接：$target"
+    done
+    [[ ! -L /usr/local/bin/v2bxss ]] || die '/usr/local/bin/v2bxss 已有符号链接，请先检查'
+    if [[ -e /usr/local/bin/v2bxss ]] && ! grep -Fq '# V2bXSS menu launcher' /usr/local/bin/v2bxss; then
+        die '/usr/local/bin/v2bxss 已被其他程序使用'
+    fi
+}
+
+menu_stable_service() {
+    local i pid
+    for ((i=0; i<15; i++)); do
+        if systemctl is-active --quiet "$service"; then break; fi
+        sleep 1
+    done
+    systemctl is-active --quiet "$service" || return 1
+    pid=$(systemctl show "$service" --property=MainPID --value)
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+    for ((i=0; i<12; i++)); do
+        sleep 1
+        systemctl is-active --quiet "$service" || return 1
+        [[ "$(systemctl show "$service" --property=MainPID --value)" == "$pid" ]] || return 1
+    done
+}
+
+menu_dependencies() {
+    local missing=false
+    for dep in git curl python3 tar gzip sha256sum realpath flock; do
+        command -v "$dep" >/dev/null || missing=true
+    done
+    if $missing; then
+        echo '正在自动准备安装依赖……'
+        if command -v apt-get >/dev/null; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y git curl python3 ca-certificates tar gzip coreutils util-linux
+        elif command -v dnf >/dev/null; then
+            dnf install -y git curl python3 ca-certificates tar gzip coreutils util-linux
+        elif command -v yum >/dev/null; then
+            yum install -y git curl python3 ca-certificates tar gzip coreutils util-linux
+        else
+            die '请先安装 git curl python3 ca-certificates tar gzip coreutils util-linux'
+        fi
+    fi
+    for dep in git curl python3 tar gzip sha256sum realpath flock; do need_command "$dep"; done
+    install -d -m 0700 "$menu_base" "$menu_base/manager"
+    exec 9>"$menu_base/manager/operation.lock"
+    flock -n 9 || die '另一个安装/配置操作正在进行，请稍后重试'
+}
+
+menu_fetch_source() {
+    menu_work=$(mktemp -d "${TMPDIR:-/var/tmp}/v2bxss-menu.XXXXXXXX")
+    install -d -m 0700 "$menu_work/tmp"
+    export TMPDIR="$menu_work/tmp"
+    menu_source="$menu_work/source"
+    echo '正在获取 xcxcadc/V2bXSS 最新二开版本……'
+    git init --quiet "$menu_source"
+    git -C "$menu_source" config core.autocrlf false
+    git -C "$menu_source" -c protocol.file.allow=never -c protocol.ext.allow=never \
+        -c http.sslVerify=true -c http.followRedirects=false \
+        fetch --quiet --no-tags --depth 1 "$repository" "refs/heads/$menu_branch"
+    git -C "$menu_source" -c core.hooksPath=/dev/null -c advice.detachedHead=false checkout --quiet --detach FETCH_HEAD
+    menu_commit=$(git -C "$menu_source" rev-parse HEAD)
+    [[ "$menu_commit" =~ ^[a-f0-9]{40}$ ]] || die '无法确认源码版本'
+    printf '本次版本：%s\n' "$menu_commit"
+}
+
+menu_prepare_go() {
+    # Use a suitable existing Go, otherwise install an isolated, checksummed
+    # toolchain. Never replace /usr/local/go or the system package manager's Go.
+    local current='' required
+    required=$(awk '$1 == "go" {print $2; exit}' "$menu_source/go.mod")
+    if command -v go >/dev/null; then
+        current=$(GOTOOLCHAIN=local GOEXPERIMENT=jsonv2 go env GOVERSION 2>/dev/null || true)
+    fi
+    if python3 "$menu_source/tools/packaging/configure-node.py" go-compatible "$current" "$required"; then return; fi
+    local metadata archive filename checksum go_version go_root
+    metadata="$menu_work/go-downloads.json"
+    echo '正在自动准备独立 Go 编译环境（不会替换系统 Go）……'
+    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+        --retry 2 --connect-timeout 20 --max-time 120 'https://go.dev/dl/?mode=json' -o "$metadata"
+    read -r go_version filename checksum < <(python3 "$menu_source/tools/packaging/configure-node.py" go-download "$metadata" "$menu_arch" "$required")
+    [[ "$go_version" =~ ^go[0-9]+\.[0-9]+\.[0-9]+$ && "$filename" == "$go_version.linux-$menu_arch.tar.gz" && "$checksum" =~ ^[a-f0-9]{64}$ ]] || die 'Go 下载元数据无效'
+    go_root="$menu_base/toolchains/$go_version"
+    [[ ! -L "$go_root" ]] || die 'Go 工具链目录不能是符号链接'
+    if [[ ! -x "$go_root/go/bin/go" ]]; then
+        archive="$menu_work/$filename"
+        curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --retry 2 --connect-timeout 20 --max-time 900 "https://go.dev/dl/$filename" -o "$archive"
+        printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --strict
+        install -d -m 0700 "$menu_base/toolchains" "$go_root"
+        tar -xzf "$archive" -C "$go_root" --no-same-owner
+    fi
+    export PATH="$go_root/go/bin:$PATH"
+    current=$(GOTOOLCHAIN=local GOEXPERIMENT=jsonv2 go env GOVERSION)
+    python3 "$menu_source/tools/packaging/configure-node.py" go-compatible "$current" "$required" || die '自动安装的 Go 版本不满足源码要求'
+}
+
+menu_save_manager() {
+    install -m 0700 "$menu_source/install.sh" "$menu_base/manager/install.sh"
+    install -m 0600 "$menu_source/tools/packaging/configure-node.py" "$menu_base/manager/configure-node.py"
+    [[ ! -L /usr/local/bin/v2bxss ]] || die '/usr/local/bin/v2bxss 已有符号链接，请先检查'
+    if [[ -e /usr/local/bin/v2bxss ]] && ! grep -Fq '# V2bXSS menu launcher' /usr/local/bin/v2bxss; then
+        die '/usr/local/bin/v2bxss 已被其他程序使用'
+    fi
+    install -d -m 0755 /usr/local/bin
+    printf '#!/usr/bin/env bash\n# V2bXSS menu launcher\nexec bash /opt/v2bx-audit-test/manager/install.sh "$@"\n' > "$menu_work/v2bxss"
+    install -m 0755 "$menu_work/v2bxss" /usr/local/bin/v2bxss
+}
+
+menu_new_config() {
+    local choice config_path
+    printf '\n1. 按提示填写面板 / 节点信息（可添加多个节点）\n2. 导入已有 JSON 配置文件\n'
+    read -r -p '请选择 [1]：' choice || return 1
+    if [[ "${choice:-1}" == 1 ]]; then
+        python3 "$menu_source/tools/packaging/configure-node.py" wizard --output "$menu_work/config.json"
+    elif [[ "$choice" == 2 ]]; then
+        read -r -p '配置文件的绝对路径：' config_path || return 1
+        python3 "$menu_source/tools/packaging/configure-node.py" import --input "$config_path" --output "$menu_work/config.json"
+    else
+        die '无效选择'
+    fi
+}
+
+menu_install_latest() {
+    menu_fetch_source
+    local args=() installed_commit=''
+    if [[ -f "$menu_config" ]]; then
+        echo '已存在配置：将完整保留，包括证书、混淆和多节点设置。'
+    else
+        menu_new_config
+        args+=(--config "$menu_work/config.json")
+    fi
+    if [[ -f "$menu_base/current/BUILD-INFO" ]]; then
+        installed_commit=$(awk -F= '$1 == "source_commit" {print $2; exit}' "$menu_base/current/BUILD-INFO")
+    fi
+    if [[ "$installed_commit" == "$menu_commit" ]]; then
+        menu_save_manager
+        echo '已经是本仓库最新版本，无需重新编译或重启。输入 v2bxss 可再次打开菜单。'
+        return
+    fi
+    menu_prepare_go
+    export GOMODCACHE="$menu_base/build-cache/modules" GOCACHE="$menu_base/build-cache/go"
+    export GOPROXY='https://proxy.golang.org,direct' GOSUMDB=sum.golang.org
+    export GOMAXPROCS="${GOMAXPROCS:-2}" GOMEMLIMIT="${GOMEMLIMIT:-384MiB}" GOFLAGS='-p=2'
+    echo '正在下载校验依赖并编译二开；首次安装可能需要数分钟，请等待……'
+    bash "$menu_source/install.sh" install --source "$menu_source" --commit "$menu_commit" \
+        --arch "$menu_arch" --version "audit-${menu_commit:0:12}-$(date -u +%Y%m%d%H%M%S)" \
+        --download-deps --apply --start "${args[@]}"
+    menu_save_manager
+    systemctl enable "$service"
+    echo '安装完成。已开启开机自启；以后输入 v2bxss 打开菜单。'
+    echo '后台托管审计规则自动同步，无需每次修改规则后重启节点。'
+}
+
+menu_configure() {
+    [[ -f "$menu_config" ]] || die '请先选择 1 完成安装'
+    menu_fetch_source
+    if [[ "$1" == 2 ]]; then
+        python3 "$menu_source/tools/packaging/configure-node.py" wizard --existing "$menu_config" --output "$menu_work/config.json"
+    else
+        local import_path answer
+        read -r -p '导入配置的绝对路径：' import_path
+        python3 "$menu_source/tools/packaging/configure-node.py" import --input "$import_path" --output "$menu_work/config.json"
+        read -r -p '将替换当前配置（先备份），确认？[y/N]：' answer
+        [[ "$answer" == y || "$answer" == Y ]] || { echo '已取消'; return; }
+    fi
+    local backup
+    backup="/var/backups/v2bx-audit-test/config-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    install -d -m 0700 "$backup"
+    cp -a "$menu_config" "$backup/config.json"
+    printf '配置备份：%s\n' "$backup/config.json"
+    install -m 0600 "$menu_work/config.json" "${menu_config}.next"
+    mv -Tf "${menu_config}.next" "$menu_config"
+    if ! systemctl restart "$service" || ! menu_stable_service; then
+        install -m 0600 "$backup/config.json" "$menu_config"
+        systemctl restart "$service" || true
+        die '新配置启动失败，已恢复旧配置；请检查菜单日志'
+    fi
+    echo '配置已保存并重启该二开服务。请在后台检查节点回执和用户/流量上报。'
+}
+
+menu_rollback() {
+    local current backup selected='' answer
+    current=$(realpath -e "$menu_base/current")
+    # Pick only a backup for the currently installed release, never an older
+    # unrelated snapshot or a config-only checkpoint.
+    for backup in /var/backups/v2bx-audit-test/*; do
+        [[ -d "$backup" && ! -L "$backup" && -f "$backup/installed-release" && -f "$backup/previous-release" ]] || continue
+        if [[ "$(<"$backup/installed-release")" == "$current" ]]; then selected=$backup; fi
+    done
+    [[ -n "$selected" ]] || die '没有适用于当前版本的上一版备份'
+    printf '将使用备份：%s\n' "$selected"
+    read -r -p '回滚二进制及该备份中的配置并重启？[y/N]：' answer
+    [[ "$answer" == y || "$answer" == Y ]] || { echo '已取消'; return; }
+    bash "$selected/rollback-test-node.sh" --backup "$selected" --apply --start
+}
+
+menu_action() {
+    case "$1" in
+        7) need_command systemctl; systemctl status --no-pager --full "$service"; return ;;
+        8) need_command journalctl; journalctl --unit "$service" --no-pager --lines 100; return ;;
+    esac
+    menu_require_host
+    case "$1" in
+        1|2|3) menu_dependencies ;;
+    esac
+    case "$1" in
+        1) menu_install_latest ;;
+        2|3) menu_configure "$1" ;;
+        4) systemctl start "$service"; menu_stable_service ;;
+        5) systemctl stop "$service" ;;
+        6) systemctl restart "$service"; menu_stable_service ;;
+        9)
+            if systemctl is-enabled --quiet "$service"; then
+                systemctl disable "$service"
+            else
+                systemctl enable "$service"
+            fi
+            ;;
+        10) menu_rollback ;;
+        *) die '无效菜单操作' ;;
+    esac
+}
+
+interactive_menu() {
+    local choice
+    while true; do
+        printf '\n========== V2bXSS 二开管理菜单 ==========\n'
+        printf '仓库：xcxcadc/V2bXSS · dev_new\n'
+        printf ' 1. 安装 / 更新到最新二开版本\n 2. 添加对接节点（保留已有节点）\n 3. 导入 / 替换配置（自动备份）\n'
+        printf ' 4. 启动服务\n 5. 停止服务\n 6. 重启服务\n 7. 查看运行状态\n 8. 查看最近日志\n'
+        printf ' 9. 开启 / 关闭开机自启\n10. 回滚上一版本\n 0. 退出\n'
+        printf '管理服务：%s\n' "$service"
+        read -r -p '请选择 [0-10]：' choice || return 0
+        case "$choice" in
+            0) return 0 ;;
+            [1-9]|10)
+                # A separate shell preserves errexit inside every action even
+                # when the menu catches its exit code to stay open on failure.
+                bash "${BASH_SOURCE[0]}" __menu_action "$choice" || echo '操作未完成；请查看上方错误。菜单仍可继续使用。'
+                ;;
+            *) echo '请输入 0-10。' ;;
+        esac
+    done
+}
+
 usage() {
     cat <<'USAGE'
 Build this V2bXSS fork and manage only the isolated V2bX-audit-test service.
+
+Interactive (recommended): bash install.sh
+Reopen after installation: v2bxss
+The menu prepares dependencies, resolves this fork's latest commit, prompts for
+node configuration and installs/starts it. Existing configuration is preserved.
+The options below are the optional advanced/non-interactive interface.
 
 Install (default is build, verify and print a plan):
   bash install.sh [install] --commit FULL_40_CHARACTER_SHA [--source CLEAN_CHECKOUT]
@@ -43,6 +310,16 @@ need_linux_root() {
     need_command uname
     [[ $(uname -s) == Linux && $(id -u) == 0 ]] || die 'Linux root is required for --apply; existing services were not changed'
 }
+
+if (($# == 0)) || [[ "${1:-}" == menu ]]; then
+    interactive_menu
+    exit 0
+fi
+if [[ "${1:-}" == __menu_action ]]; then
+    [[ $# == 2 ]] || die '无效菜单参数'
+    menu_action "$2"
+    exit 0
+fi
 
 action=install
 if (($#)) && [[ "$1" != -* ]]; then

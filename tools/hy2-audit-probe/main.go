@@ -22,12 +22,14 @@ import (
 
 	"github.com/apernet/hysteria/core/v2/client"
 	coreerrors "github.com/apernet/hysteria/core/v2/errors"
+	"github.com/apernet/hysteria/extras/v2/obfs"
 )
 
 type config struct {
 	Server    string `json:"server"`
 	Auth      string `json:"auth"`
 	TimeoutMS int    `json:"timeout_ms"`
+	Obfs      string `json:"obfs_password,omitempty"`
 	TLS       struct {
 		ServerName string `json:"server_name"`
 		CAFile     string `json:"ca_file"`
@@ -171,6 +173,7 @@ func readConfig(path string) (config, error) {
 type packetFactory struct {
 	mu   sync.Mutex
 	conn net.PacketConn
+	obfs obfs.Obfuscator
 }
 
 func (p *packetFactory) New(addr net.Addr) (net.PacketConn, error) {
@@ -181,6 +184,9 @@ func (p *packetFactory) New(addr net.Addr) (net.PacketConn, error) {
 		listen = "[::1]:0"
 	}
 	c, err := net.ListenPacket("udp", listen)
+	if err == nil && p.obfs != nil {
+		c = obfs.WrapPacketConn(c, p.obfs)
+	}
 	p.conn = c
 	return c, err
 }
@@ -209,6 +215,12 @@ func connect(c config) (client.Client, bool, error) {
 		}
 	}
 	pf := &packetFactory{}
+	if c.Obfs != "" {
+		pf.obfs, err = obfs.NewSalamanderObfuscator([]byte(c.Obfs))
+		if err != nil {
+			return nil, false, errors.New("invalid_obfs_password")
+		}
+	}
 	completed := make(chan struct{})
 	timer := time.AfterFunc(time.Duration(c.TimeoutMS)*time.Millisecond, func() {
 		select {

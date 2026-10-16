@@ -46,7 +46,7 @@ source_untracked=$(
         done | sha256sum | cut -d ' ' -f 1
 )
 mkdir -- "$output_dir"
-build_tags='sing xray hysteria2 with_quic with_utls with_wireguard with_acme with_gvisor'
+build_tags='sing xray hysteria2 with_quic with_grpc with_utls with_wireguard with_acme with_gvisor'
 (
     cd -- "$source_dir"
     # Fail instead of downloading dependencies or switching toolchains.

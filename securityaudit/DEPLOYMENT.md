@@ -52,7 +52,8 @@ GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 sha256sum V2bX-audit-linux-amd64
 ```
 
-这里列出的构建标签经过验证；没有把 `with_grpc` 或全部平台/协议的兼容性算作已验证。
+这里列出的是此前验收标签。后续一键新装及原版升级已补充 `with_grpc`，
+并通过完整标签 Linux/amd64 编译；仍未把全部平台/协议的真实客户端兼容性算作已验证。
 交付时记录实际产物哈希；修改源码或编译器后应重新记录，不能复用旧产物哈希。
 
 ## 隔离安装
@@ -60,8 +61,10 @@ sha256sum V2bX-audit-linux-amd64
 本仓库首页安装命令改用自己的 [`install.sh`](../install.sh)，从固定提交构建二开，
 不调用上游安装器。本分支已禁用 `V2bX update`，避免被上游脚本覆盖。源码仓库另提供
 [`tools/packaging`](../tools/packaging/README.zh-CN.md) 离线构建、隔离测试安装和回滚工具。
-安装/回滚默认只校验，显式 `--apply` 才写入，另加 `--start` 才启动；没有可直接覆盖
-任意既有服务的通用迁移器。构建包包含版本和工作树哈希，安装校验二进制及完整清单。
+高级安装/回滚默认只校验，显式 `--apply` 才写入，另加 `--start` 才启动。
+无参数新装菜单在用户选择安装后自动构建和启动。已有原版的独立原位升级入口为
+`upgrade-legacy-node.sh`，具体保留范围、备份及回滚见打包工具说明。
+构建包包含版本和工作树哈希，安装校验二进制及完整清单。
 
 首次验收应使用独立测试目录、测试面板、测试节点 ID、测试用户和端口。例如将已核验
 的产物由安装器存为 `/opt/v2bx-audit-test/releases/<version>/V2bX`，配置存为
