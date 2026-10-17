@@ -4,8 +4,8 @@ umask 077
 
 usage() {
     cat <<'USAGE'
-Rollback only an isolated V2bX-audit-test installation. No files are deleted.
-Usage: bash rollback-test-node.sh --backup /var/backups/v2bx-audit-test/NAME [--apply] [--start] [--dry-run]
+Rollback only an independent v2bxss installation. No files are deleted.
+Usage: bash rollback-test-node.sh --backup /var/backups/v2bxss/NAME [--apply] [--start] [--dry-run]
 Default: verify the selected backup and show the plan without changing anything.
 --apply stops this test service and restores a prior release/config/unit when present.
 --apply --start also starts the restored prior release. First installs are stopped only.
@@ -32,10 +32,10 @@ if $apply && $explicit_dry_run; then echo '--apply and --dry-run conflict' >&2; 
 for required in realpath dirname basename install ln mv cmp cp date id uname; do
     command -v "$required" >/dev/null || { echo "Missing command: $required" >&2; exit 1; }
 done
-base_dir=/opt/v2bx-audit-test
-backup_base=/var/backups/v2bx-audit-test
-config_dir=/etc/v2bx-audit-test
-service_file=/etc/systemd/system/V2bX-audit-test.service
+base_dir=/etc/v2bxss
+backup_base=/var/backups/v2bxss
+config_dir=/etc/v2bxss
+service_file=/etc/systemd/system/v2bxss.service
 for protected in /opt /etc /etc/systemd /etc/systemd/system /var /var/backups "$base_dir" "$base_dir/releases" "$backup_base" "$config_dir" "$service_file" "$config_dir/config.json" "$backup_dir"; do
     [[ ! -L "$protected" ]] || { echo "Refusing symbolic rollback target: $protected" >&2; exit 1; }
 done
@@ -51,12 +51,12 @@ installed_release=$(<"$backup_dir/installed-release")
 previous_release=''
 if [[ -f "$backup_dir/previous-release" ]]; then
     previous_release=$(<"$backup_dir/previous-release")
-    [[ "$(dirname -- "$previous_release")" == "$base_dir/releases" && "$(basename -- "$previous_release")" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$ && ! -L "$previous_release" && -d "$previous_release" && ! -L "$previous_release/V2bX" && -f "$previous_release/V2bX" ]] || { echo 'Prior release is missing or outside the isolated installation' >&2; exit 1; }
-    [[ ! -L "$backup_dir/previous-release-files" && -d "$backup_dir/previous-release-files" && ! -L "$backup_dir/previous-release-files/V2bX" && -f "$backup_dir/previous-release-files/V2bX" ]] || { echo 'Prior release backup is missing' >&2; exit 1; }
-    cmp -s "$previous_release/V2bX" "$backup_dir/previous-release-files/V2bX" || { echo 'Prior binary differs from the backup; review before restoring manually' >&2; exit 1; }
+    [[ "$(dirname -- "$previous_release")" == "$base_dir/releases" && "$(basename -- "$previous_release")" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$ && ! -L "$previous_release" && -d "$previous_release" && ! -L "$previous_release/v2bxss" && -f "$previous_release/v2bxss" ]] || { echo 'Prior release is missing or outside the isolated installation' >&2; exit 1; }
+    [[ ! -L "$backup_dir/previous-release-files" && -d "$backup_dir/previous-release-files" && ! -L "$backup_dir/previous-release-files/v2bxss" && -f "$backup_dir/previous-release-files/v2bxss" ]] || { echo 'Prior release backup is missing' >&2; exit 1; }
+    cmp -s "$previous_release/v2bxss" "$backup_dir/previous-release-files/v2bxss" || { echo 'Prior binary differs from the backup; review before restoring manually' >&2; exit 1; }
 fi
 if ! $apply; then
-    printf 'DRY RUN: stop V2bX-audit-test.service only.\nPrevious release: %s\nRestore prior config/unit when backed up. Start requested: %s\nNo files or services changed. Add --apply to roll back.\n' "${previous_release:-none (first installation; service stays stopped)}" "$start_service"
+    printf 'DRY RUN: stop v2bxss.service only.\nPrevious release: %s\nRestore prior config/unit when backed up. Start requested: %s\nNo files or services changed. Add --apply to roll back.\n' "${previous_release:-none (first installation; service stays stopped)}" "$start_service"
     exit 0
 fi
 [[ $(id -u) == 0 && $(uname -s) == Linux ]] || { echo 'Linux root required for rollback' >&2; exit 1; }
@@ -68,7 +68,7 @@ printf '%s\n' "$installed_release" > "$checkpoint/current-release"
 if [[ -f "$config_dir/config.json" ]]; then cp -a "$config_dir/config.json" "$checkpoint/config.json"; fi
 if [[ -f "$service_file" ]]; then cp -a "$service_file" "$checkpoint/service"; fi
 printf 'Rollback checkpoint: %s\n' "$checkpoint"
-systemctl stop V2bX-audit-test.service
+systemctl stop v2bxss.service
 if [[ -z "$previous_release" ]]; then
     echo 'First installation stopped. Isolated files, configuration and backups retained; no existing upstream service changed.'
     exit 0
@@ -81,8 +81,8 @@ mv -Tf "$base_dir/current.rollback-$$" "$base_dir/current"
 systemctl daemon-reload
 printf 'Restored release: %s\n' "$previous_release"
 if $start_service; then
-    systemctl start V2bX-audit-test.service
-    systemctl is-active --quiet V2bX-audit-test.service || { echo 'Restored test service did not stay active; inspect its journal' >&2; exit 1; }
+    systemctl start v2bxss.service
+    systemctl is-active --quiet v2bxss.service || { echo 'Restored test service did not stay active; inspect its journal' >&2; exit 1; }
 else
     echo 'Restored test service remains stopped; start explicitly after checking configuration.'
 fi

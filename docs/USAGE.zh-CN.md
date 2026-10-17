@@ -26,10 +26,12 @@ Go 模块后构建二开。首次需要数分钟；不要求手动 clone、取�
 2. 首次选 1 后，按配置向导填写自己的面板地址、节点 API 密钥、节点类型/ID、证书。
    可以连续添加多个节点，也可以导入已有标准 JSON。复杂配置参考
    [HY2 配置示例](../example/security-audit-hy2-test.json)。配置凭证只留在服务器。
-3. 菜单安装会自动备份、安装并启动独立的 `V2bX-audit-test` 服务，开启开机自启。
+3. 菜单安装会自动备份、安装并启动独立的 `v2bxss.service`，开启开机自启。
    菜单 2 追加节点；菜单 3 导入替换配置，先备份再重启；菜单 7/8 看状态和最近日志，
    菜单 11 持续查看实时运行/连接日志，按 Ctrl+C 返回菜单。
    原有 `V2bX` 服务独立管理；请避免对接相同端口。高级参数方式仍默认只打印计划。
+   新版目录统一为 `/etc/v2bxss`；管理命令缺失时运行 `bash install.sh repair`。
+   旧独立目录使用菜单 12 迁移，不会强制迁移原版 `/etc/V2bX`。
 4. 在后台新增规则，先选择指定测试节点、观察模式；查看“节点状态”的请求版本和
    已应用版本一致，再测试命中。旧面板缺少审计 API 时，节点原业务继续运行。
 
@@ -61,7 +63,7 @@ v2bxss logs -f --service V2bX.service
 旧管理器尚未更新或原版原位升级未安装 `v2bxss` 快捷入口时，可直接使用：
 
 ```sh
-journalctl -u V2bX-audit-test.service -f -n 100 --no-pager -o short-iso
+journalctl -u v2bxss.service -f -n 100 --no-pager -o short-iso
 # 原版原位升级的服务对应以下命令
 journalctl -u V2bX.service -f -n 100 --no-pager -o short-iso
 ```
@@ -116,7 +118,7 @@ UDP 目标变化及策略版本变化后的数据包。若新规则未命中，�
 
 ```json
 {
-  "RuleListPath": "/etc/v2bx-audit-test/local-rules.txt",
+  "RuleListPath": "/etc/v2bxss/local-rules.txt",
   "RuleListEnforce": false
 }
 ```

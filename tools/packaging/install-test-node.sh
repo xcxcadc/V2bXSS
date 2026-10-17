@@ -4,7 +4,7 @@ umask 077
 
 usage() {
     cat <<'USAGE'
-Verify/install only the isolated V2bX-audit-test service. No network downloads.
+Verify/install only the independent v2bxss.service. No network downloads.
 Usage: bash install-test-node.sh --bundle PATH --version VERSION --binary-sha256 HASH --manifest-sha256 HASH [--config TEST_CONFIG] [--apply] [--start] [--dry-run]
 Default: verify and print the plan without writing or starting anything.
 --apply installs; --apply --start explicitly starts/restarts this isolated service.
@@ -43,13 +43,13 @@ for required in sha256sum realpath install cmp awk date cp ln mv cut readlink id
 done
 bundle=$(realpath -e -- "$bundle")
 [[ -d "$bundle" ]] || { echo 'Bundle directory not found' >&2; exit 1; }
-for filename in V2bX BUILD-INFO install-test-node.sh rollback-test-node.sh V2bX-audit-test.service SHA256SUMS; do
+for filename in v2bxss BUILD-INFO install-test-node.sh rollback-test-node.sh v2bxss.service v2bxss-manager SHA256SUMS; do
     [[ -f "$bundle/$filename" && ! -L "$bundle/$filename" ]] || { echo "Missing or symbolic bundle file: $filename" >&2; exit 1; }
 done
-actual_binary=$(sha256sum "$bundle/V2bX" | cut -d ' ' -f 1)
+actual_binary=$(sha256sum "$bundle/v2bxss" | cut -d ' ' -f 1)
 actual_manifest=$(sha256sum "$bundle/SHA256SUMS" | cut -d ' ' -f 1)
 [[ "${actual_binary,,}" == "${expected_binary,,}" && "${actual_manifest,,}" == "${expected_manifest,,}" ]] || { echo 'SHA256 mismatch; no installation performed' >&2; exit 1; }
-if ! awk '{name=$2; sub(/^\*/, "", name)} NF != 2 || $1 !~ /^[a-fA-F0-9]+$/ || length($1) != 64 || name !~ /^(V2bX|BUILD-INFO|install-test-node\.sh|rollback-test-node\.sh|V2bX-audit-test\.service)$/ {bad=1} {if (seen[name]++) bad=1} END {exit bad || NR != 5}' "$bundle/SHA256SUMS"; then
+if ! awk '{name=$2; sub(/^\*/, "", name)} NF != 2 || $1 !~ /^[a-fA-F0-9]+$/ || length($1) != 64 || name !~ /^(v2bxss|BUILD-INFO|install-test-node\.sh|rollback-test-node\.sh|v2bxss\.service|v2bxss-manager)$/ {bad=1} {if (seen[name]++) bad=1} END {exit bad || NR != 6}' "$bundle/SHA256SUMS"; then
     echo 'Invalid bundle manifest' >&2; exit 1
 fi
 (cd -- "$bundle" && sha256sum --check --strict SHA256SUMS)
@@ -57,10 +57,10 @@ fi
 architecture=$(awk -F= '$1=="goarch" {print $2}' "$bundle/BUILD-INFO")
 [[ "$(awk -F= '$1=="goos" {print $2}' "$bundle/BUILD-INFO")" == linux && "$architecture" =~ ^(amd64|arm64)$ ]] || { echo 'Bundle target must be Linux amd64 or arm64' >&2; exit 1; }
 
-base_dir=/opt/v2bx-audit-test
-config_dir=/etc/v2bx-audit-test
-service_file=/etc/systemd/system/V2bX-audit-test.service
-backup_base=/var/backups/v2bx-audit-test
+base_dir=/etc/v2bxss
+config_dir=/etc/v2bxss
+service_file=/etc/systemd/system/v2bxss.service
+backup_base=/var/backups/v2bxss
 for protected in /opt /etc /etc/systemd /etc/systemd/system /var /var/backups "$base_dir" "$base_dir/releases" "$config_dir" "$backup_base" "$service_file" "$config_dir/config.json"; do
     [[ ! -L "$protected" ]] || { echo "Refusing symbolic installation target: $protected" >&2; exit 1; }
 done
@@ -68,9 +68,9 @@ done
 previous_release=''
 if [[ -L "$base_dir/current" ]]; then
     previous_release=$(realpath -e -- "$base_dir/current")
-    [[ "$(dirname -- "$previous_release")" == "$base_dir/releases" && -f "$previous_release/V2bX" && ! -L "$previous_release/V2bX" ]] || { echo 'Previous release escapes the isolated installation or is invalid' >&2; exit 1; }
+    [[ "$(dirname -- "$previous_release")" == "$base_dir/releases" && -f "$previous_release/v2bxss" && ! -L "$previous_release/v2bxss" ]] || { echo 'Previous release escapes the isolated installation or is invalid' >&2; exit 1; }
 fi
-if [[ -f "$service_file" ]] && ! cmp -s "$service_file" "$bundle/V2bX-audit-test.service"; then
+if [[ -f "$service_file" ]] && ! cmp -s "$service_file" "$bundle/v2bxss.service"; then
     echo 'Existing test unit differs; review it before installing' >&2; exit 1
 fi
 release_dir="$base_dir/releases/$version"
@@ -78,18 +78,20 @@ release_dir="$base_dir/releases/$version"
 if [[ -f "$config_dir/config.json" ]]; then
     [[ -z "$new_config" ]] || { echo 'Existing config is preserved; omit --config on upgrade' >&2; exit 1; }
 else
+    [[ ! -f /etc/v2bx-audit-test/config.json ]] || { echo 'Old layout found; run menu option 12 before installing' >&2; exit 1; }
     [[ -n "$new_config" ]] || { echo 'First installation requires an explicit test-node --config' >&2; exit 1; }
     [[ ! -L "$new_config" ]] || { echo 'Test config must not be a symlink' >&2; exit 1; }
     new_config=$(realpath -e -- "$new_config")
     [[ -f "$new_config" ]] || { echo 'Test config not found' >&2; exit 1; }
 fi
 if ! $apply; then
-    printf 'DRY RUN: verified bundle %s (%s).\nWould install %s\nConfig: %s/config.json\nService: V2bX-audit-test.service\nStart requested: %s\nNo files or services changed. Add --apply to install.\n' "$version" "$architecture" "$release_dir" "$config_dir" "$start_service"
+    printf 'DRY RUN: verified bundle %s (%s).\nWould install %s\nConfig: %s/config.json\nService: v2bxss.service\nStart requested: %s\nNo files or services changed. Add --apply to install.\n' "$version" "$architecture" "$release_dir" "$config_dir" "$start_service"
     exit 0
 fi
 [[ $(id -u) == 0 && $(uname -s) == Linux ]] || { echo 'Linux root required for installation' >&2; exit 1; }
 case "$(uname -m):$architecture" in x86_64:amd64|aarch64:arm64|arm64:arm64) ;; *) echo 'Bundle architecture does not match this host' >&2; exit 1 ;; esac
 command -v systemctl >/dev/null || { echo 'systemd is required' >&2; exit 1; }
+bash "$bundle/v2bxss-manager" repair
 backup_dir="$backup_base/$(date -u +%Y%m%dT%H%M%SZ)-$version-$$"
 [[ ! -e "$backup_dir" && ! -L "$backup_dir" ]] || { echo 'Backup path already exists' >&2; exit 1; }
 install -d -m 0700 "$backup_base" "$backup_dir"
@@ -102,14 +104,14 @@ if [[ -n "$previous_release" ]]; then
 fi
 if [[ -f "$config_dir/config.json" ]]; then cp -a "$config_dir/config.json" "$backup_dir/config.json"; fi
 if [[ -f "$service_file" ]]; then cp -a "$service_file" "$backup_dir/service"; fi
-systemctl is-active V2bX-audit-test.service > "$backup_dir/previous-service-state" || true
+systemctl is-active v2bxss.service > "$backup_dir/previous-service-state" || true
 install -m 0755 "$bundle/rollback-test-node.sh" "$backup_dir/rollback-test-node.sh"
 install -d -m 0700 "$base_dir" "$base_dir/releases" "$config_dir" "$release_dir"
-install -m 0755 "$bundle/V2bX" "$release_dir/V2bX"
+install -m 0755 "$bundle/v2bxss" "$release_dir/v2bxss"
 install -m 0600 "$bundle/BUILD-INFO" "$release_dir/BUILD-INFO"
 install -m 0600 "$bundle/SHA256SUMS" "$release_dir/SHA256SUMS"
 if [[ -n "$new_config" ]]; then install -m 0600 "$new_config" "$config_dir/config.json"; fi
-install -m 0644 "$bundle/V2bX-audit-test.service" "$service_file"
+install -m 0644 "$bundle/v2bxss.service" "$service_file"
 [[ ! -e "$base_dir/current.next-$$" && ! -L "$base_dir/current.next-$$" ]] || { echo 'Temporary link already exists' >&2; exit 1; }
 ln -s "$release_dir" "$base_dir/current.next-$$"
 mv -Tf "$base_dir/current.next-$$" "$base_dir/current"
@@ -119,19 +121,19 @@ if $start_service; then
     stable_service() {
         local i pid
         for ((i=0; i<15; i++)); do
-            if systemctl is-active --quiet V2bX-audit-test.service; then break; fi
+            if systemctl is-active --quiet v2bxss.service; then break; fi
             sleep 1
         done
-        systemctl is-active --quiet V2bX-audit-test.service || return 1
-        pid=$(systemctl show V2bX-audit-test.service --property=MainPID --value)
+        systemctl is-active --quiet v2bxss.service || return 1
+        pid=$(systemctl show v2bxss.service --property=MainPID --value)
         [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
         for ((i=0; i<12; i++)); do
             sleep 1
-            systemctl is-active --quiet V2bX-audit-test.service || return 1
-            [[ "$(systemctl show V2bX-audit-test.service --property=MainPID --value)" == "$pid" ]] || return 1
+            systemctl is-active --quiet v2bxss.service || return 1
+            [[ "$(systemctl show v2bxss.service --property=MainPID --value)" == "$pid" ]] || return 1
         done
     }
-    if ! systemctl restart V2bX-audit-test.service || ! stable_service; then
+    if ! systemctl restart v2bxss.service || ! stable_service; then
         echo "Test service did not stay active; restoring the previous installation. Backup: $backup_dir" >&2
         restore_args=()
         if grep -Fxq active "$backup_dir/previous-service-state"; then restore_args+=(--start); fi

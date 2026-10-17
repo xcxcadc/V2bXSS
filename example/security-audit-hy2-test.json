@@ -9,7 +9,7 @@
         "NodeID": 1,
         "NodeType": "hysteria2",
         "Timeout": 10,
-        "SecurityAuditCachePath": "/etc/v2bx-audit-test/audit-cache-hy2.json"
+        "SecurityAuditCachePath": "/etc/v2bxss/audit-cache-hy2.json"
       },
       "Options": {
         "Core": "hysteria2",
@@ -21,8 +21,8 @@
         "CertConfig": {
           "CertMode": "file",
           "CertDomain": "audit-node.example",
-          "CertFile": "/etc/v2bx-audit-test/tls.crt",
-          "KeyFile": "/etc/v2bx-audit-test/tls.key"
+          "CertFile": "/etc/v2bxss/tls.crt",
+          "KeyFile": "/etc/v2bxss/tls.key"
         }
       }
     }

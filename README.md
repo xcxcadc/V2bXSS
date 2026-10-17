@@ -111,13 +111,31 @@ v2bxss
 以后更新仍选择 **1**，自动获取本仓库 `dev_new` 最新版本，完整保留现有配置、
 证书及混淆；已经是最新版时不重新编译。安装前自动备份并显示路径。
 
-本二开使用独立服务 `V2bX-audit-test.service` 和 `/etc/v2bx-audit-test/config.json`。
+本二开统一存放在 `/etc/v2bxss`，管理脚本为 `/etc/v2bxss/v2bxss`，
+节点程序为 `/etc/v2bxss/current/v2bxss`，配置为 `/etc/v2bxss/config.json`，
+独立服务为 `v2bxss.service`。`/usr/local/bin/v2bxss` 只是管理快捷入口。
 若原有上游服务正在使用相同端口，应先处理端口冲突；菜单不会自动停掉上游服务。
 工具链安装在自己的目录，不替换系统 Go。高级固定提交/离线安装入口仍保留，见
 [完整安装说明](tools/packaging/README.zh-CN.md)。
 
 升级二进制会重启该二开服务一次；之后后台托管审计规则约 30 秒自动同步，
 不需要为每条规则登录服务器或重启所有节点。
+
+### 修复管理命令 / 迁移旧版独立目录
+
+若输入 `v2bxss` 提示旧 `/opt/.../manager/install.sh` 不存在，运行：
+
+```sh
+wget -N https://raw.githubusercontent.com/xcxcadc/V2bXSS/dev_new/install.sh && bash install.sh repair
+```
+
+`repair` 只恢复管理脚本和命令，不编译、不修改节点配置、不重启节点。
+随后运行 `v2bxss`，选择 **12**，可将旧 `/etc/v2bx-audit-test` 独立安装迁移到
+`/etc/v2bxss`；复制而不删除旧配置、证书和程序，保留混淆与自定义配置。
+原服务运行时切换一次，新服务未稳定则自动切回；原来停止的服务仍保持停止。
+迁移备份和回滚命令现场打印在终端，备份位于 `/var/backups/v2bxss/layout-.../`。
+迁移保留原二进制版本，需要更新二开代码时再选菜单 **1**。
+此迁移仅针对旧独立安装；原版 `/etc/V2bX` 仍使用上面的独立原位升级脚本，不强制改路径。
 
 ## 构建
 ```sh

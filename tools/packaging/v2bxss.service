@@ -1,0 +1,20 @@
+# Independent fork service; never replaces an upstream V2bX service.
+[Unit]
+Description=V2bXSS node with security audit
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/etc/v2bxss
+ExecStart=/etc/v2bxss/current/v2bxss server --config /etc/v2bxss/config.json --watch=false
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

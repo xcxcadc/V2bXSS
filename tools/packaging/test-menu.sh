@@ -9,15 +9,15 @@ export MENU_TEST_LOG="$fixture/services"
 cat > "$fixture/bin/systemctl" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$MENU_TEST_LOG"
-[[ "$*" == 'status --no-pager --full V2bX-audit-test.service' ]] || exit 90
+[[ "$*" == 'status --no-pager --full v2bxss.service' ]] || exit 90
 exit "${MENU_TEST_STATUS:-0}"
 STUB
 cat > "$fixture/bin/journalctl" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$MENU_TEST_LOG"
 case "$*" in
-    '--unit V2bX-audit-test.service --no-pager --lines 100 --output short-iso' | \
-    '--unit V2bX-audit-test.service --no-pager --lines 100 --output short-iso --follow' | \
+    '--unit v2bxss.service --no-pager --lines 100 --output short-iso' | \
+    '--unit v2bxss.service --no-pager --lines 100 --output short-iso --follow' | \
     '--unit V2bX.service --no-pager --lines 0 --output short-iso --follow') ;;
     *) exit 91 ;;
 esac
@@ -37,7 +37,7 @@ grep -Fq 'V2bXSS 二开管理菜单' "$fixture/exit.log"
 [[ ! -e "$MENU_TEST_LOG" ]]
 echo 'PASS: no-argument menu opens and exits without dependencies or network'
 printf 'unexpected\n7\n8\n11\n0\n' | bash "$entrypoint" > "$fixture/navigation.log"
-grep -Fq '请输入 0-11' "$fixture/navigation.log"
+grep -Fq '请输入 0-12' "$fixture/navigation.log"
 grep -Fq '查看实时运行 / 连接日志' "$fixture/navigation.log"
 [[ $(wc -l < "$MENU_TEST_LOG") == 3 ]]
 echo 'PASS: invalid input returns to menu; status/logs target only fork service'

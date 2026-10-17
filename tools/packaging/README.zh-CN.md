@@ -9,7 +9,7 @@ wget -N https://raw.githubusercontent.com/xcxcadc/V2bXSS/dev_new/install.sh && b
 使用 Linux root、systemd、amd64/arm64。菜单 1 安装/更新自己的二开，自动准备
 系统依赖、独立 Go 工具链和模块，固定本次取得的完整提交后构建。Go 官方下载使用
 官网发布的 SHA256 校验；模块使用 go.sum 和校验服务。首次编译需要数分钟及足够磁盘。
-工具链和构建缓存位于 `/opt/v2bx-audit-test/`，不替换系统 Go。
+工具链和构建缓存位于 `/etc/v2bxss/`，不替换系统 Go。
 
 安装入口和独立原版升级入口均只获取 `xcxcadc/V2bXSS/dev_new`，输出本次完整提交及源码链接，
 再从固定提交构建；不下载上游原版二进制或旧 Release。同步到仓库不会自动更改已部署节点，
@@ -34,24 +34,42 @@ TLS 可用已有文件或自动 HTTP 证书；后者要求域名已解析到本�
 | 9 | 开启/关闭二开服务开机自启 |
 | 10 | 选取匹配当前版本的上一版备份，确认后回滚并重启 |
 | 11 | 实时跟随当前运行/连接日志；Ctrl+C 结束查看返回菜单，不停止节点 |
+| 12 | 将旧独立目录迁移到 `/etc/v2bxss`，备份后切换服务；失败切回，旧文件保留 |
 | 0 | 退出 |
 
 菜单中的写入操作直接执行，无需再追加高级参数。安装成功自动开启开机自启。
 更新保留整个现有配置文件，包括带注释 JSON、外部 Include、证书和混淆配置；
 只有追加/导入向导需要可校验的标准 JSON，自定义 Include 可直接修改原配置。
 每次程序安装沿用下面的哈希校验、备份和独立服务路径。
-配置编辑备份另放在 `/var/backups/v2bx-audit-test/config-<UTC时间>-<PID>/config.json`。
+管理脚本位于 `/etc/v2bxss/v2bxss`，程序为 `/etc/v2bxss/current/v2bxss`。
+菜单打开时即保存可独立运行的管理脚本，且高级 bundle 安装也先安装管理入口，
+不再出现仅留下快捷命令却未安装目标脚本的情况。
+配置编辑备份另放在 `/var/backups/v2bxss/config-<UTC时间>-<PID>/config.json`。
 安装失败保留构建目录并显示错误，菜单不会因单次失败退出。
 
 升级程序重启本服务一次；后台托管规则约 30 秒热同步，无需为每条规则重启。
-菜单只管理 `V2bX-audit-test.service`，不自动接管上游服务或修改防火墙。
+菜单只管理 `v2bxss.service`，不自动接管上游服务或修改防火墙。
 如果原节点还占用相同端口，请先处理冲突，再启动二开。
+
+## 只修复管理入口 / 旧独立安装迁移
+
+```sh
+wget -N https://raw.githubusercontent.com/xcxcadc/V2bXSS/dev_new/install.sh && bash install.sh repair
+v2bxss
+```
+
+`repair` 不联网、不编译、不操作服务，也不改配置。随后选择菜单 12 可迁移旧独立安装。
+迁移保留旧文件和原二进制版本、打印备份/回滚命令；只把配置中的旧私有目录前缀
+改为 `/etc/v2bxss/`，其他设置、密钥及外部证书路径保持原样。
+旧目录丢失而程序仍在运行时，先从 Linux 运行中可执行文件备份恢复，才允许停止旧服务。
+不能恢复旧程序或存在自定义 systemd drop-in 时拒绝切换，不会盲目重启。
+迁移后要更新二开代码，再选择菜单 1。旧原版 `/etc/V2bX` 不属于该迁移范围。
 
 ## 高级：固定提交和离线操作
 
 以下为可选的高级入口，不是日常一键安装的必做步骤。
 此目录的离线脚本安装本分支二开，不调用上游一键脚本，也不下载二进制或依赖。
-只管理 `V2bX-audit-test.service`，不管理现有 `V2bX.service`、`/etc/V2bX`、面板或数据库。
+只管理 `v2bxss.service`，不管理现有 `V2bX.service`、`/etc/V2bX`、面板或数据库。
 安装和回滚默认都只校验并打印计划；必须显式 `--apply` 才写入，另加 `--start` 才启动。
 构建脚本会写入显式指定的新输出目录，不修改源目录。
 
@@ -114,7 +132,7 @@ bash install.sh stop --apply
 bash install.sh start --apply
 ```
 
-状态和最近 100 条日志只读取 `V2bX-audit-test.service`；启动、重启和停止必须加 `--apply`。
+状态和最近 100 条日志只读取 `v2bxss.service`；启动、重启和停止必须加 `--apply`。
 这些命令不管理原 `V2bX.service`，也没有卸载、删除备份或修改开机启动的隐式操作。
 **更换二进制需要一次明确重启；之后已支持的后台审计规则热更新无需重启节点。**
 
@@ -159,14 +177,14 @@ bash ./install-test-node.sh \
 
 | 对象 | 固定隔离路径 |
 | --- | --- |
-| 每个版本 | `/opt/v2bx-audit-test/releases/<version>/` |
-| 当前版本 | `/opt/v2bx-audit-test/current` |
-| 测试配置 | `/etc/v2bx-audit-test/config.json` |
-| 独立服务 | `/etc/systemd/system/V2bX-audit-test.service` |
-| 每次安装前备份 | `/var/backups/v2bx-audit-test/<UTC时间>-<version>-<PID>/` |
+| 每个版本 | `/etc/v2bxss/releases/<version>/` |
+| 当前版本 | `/etc/v2bxss/current` |
+| 测试配置 | `/etc/v2bxss/config.json` |
+| 独立服务 | `/etc/systemd/system/v2bxss.service` |
+| 每次安装前备份 | `/var/backups/v2bxss/<UTC时间>-<version>-<PID>/` |
 
 升级时使用新版本名并省略 `--config`，已有配置会保留；同名版本拒绝覆盖。
-脚本验证二进制、清单、完整五项文件哈希、版本、目标架构以及路径类型。
+脚本验证二进制、清单、完整六项文件哈希（含管理器）、版本、目标架构以及路径类型。
 备份先于版本切换，包含旧版本副本、旧配置和 unit、旧服务状态以及回滚脚本。
 脚本不删除旧版本、备份或证据。没有 `--start` 时，已运行的进程继续使用旧二进制。
 如果中途失败，查阅已经打印的备份路径和当前链接，不能假定自动回滚已经完成。
@@ -176,8 +194,8 @@ bash ./install-test-node.sh \
 从安装输出取得确切备份目录，先打印计划：
 
 ```sh
-bash /var/backups/v2bx-audit-test/<备份名>/rollback-test-node.sh \
-  --backup /var/backups/v2bx-audit-test/<备份名>
+bash /var/backups/v2bxss/<备份名>/rollback-test-node.sh \
+  --backup /var/backups/v2bxss/<备份名>
 ```
 
 确认后加 `--apply`，只停止隔离测试服务并恢复备份对应的旧版本链接、旧配置和 unit。

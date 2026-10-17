@@ -67,12 +67,12 @@ sha256sum V2bX-audit-linux-amd64
 构建包包含版本和工作树哈希，安装校验二进制及完整清单。
 
 首次验收应使用独立测试目录、测试面板、测试节点 ID、测试用户和端口。例如将已核验
-的产物由安装器存为 `/opt/v2bx-audit-test/releases/<version>/V2bX`，配置存为
-`/etc/v2bx-audit-test/config.json`，独立服务对应的命令为：
+的产物由安装器存为 `/etc/v2bxss/releases/<version>/v2bxss`，配置存为
+`/etc/v2bxss/config.json`，独立服务对应的命令为：
 
 ```sh
-/opt/v2bx-audit-test/current/V2bX server \
-  --config /etc/v2bx-audit-test/config.json --watch=false
+/etc/v2bxss/current/v2bxss server \
+  --config /etc/v2bxss/config.json --watch=false
 ```
 
 不要复用或覆盖 `/etc/V2bX`、现有 systemd 服务和正式节点端口。示例配置
@@ -121,7 +121,7 @@ TCP 的明确审计拒绝才算阻断通过；UDP 超时必须结合匹配的后
 
 正式服部署需要独立授权与完整回归结果。回滚应恢复备份二进制、配置和服务定义，
 不得用测试数据库覆盖正式数据库。保留原有证据；停用策略和回滚程序是两个不同操作。
-隔离安装器将备份路径打印到终端，备份位于 `/var/backups/v2bx-audit-test/`。
+隔离安装器将备份路径打印到终端，备份位于 `/var/backups/v2bxss/`。
 从该备份运行 `rollback-test-node.sh --backup <完整备份路径>` 可先校验并显示计划；
 显式 `--apply` 才恢复，`--apply --start` 才启动旧版本。首次安装没有旧版本时只停止
 测试服务，保留文件和备份；回滚前还会保存当前配置检查点。

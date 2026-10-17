@@ -4,7 +4,7 @@ umask 077
 
 # Non-privileged validation only. No --apply command is executed by this test.
 [[ $# == 2 && "$1" == --bundle ]] || { echo 'Usage: bash test-packaging.sh --bundle BUILT_BUNDLE' >&2; exit 2; }
-for protected in /opt/v2bx-audit-test /etc/v2bx-audit-test /etc/systemd/system/V2bX-audit-test.service /var/backups/v2bx-audit-test; do
+for protected in /etc/v2bxss /etc/v2bxss /etc/systemd/system/v2bxss.service /var/backups/v2bxss; do
     [[ ! -e "$protected" && ! -L "$protected" ]] || { echo 'Run on a clean validation workstation; isolated installation already exists' >&2; exit 1; }
 done
 bundle=$(realpath -e -- "$2")
@@ -13,7 +13,7 @@ fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/v2bx-packaging-check.XXXXXXXX")
 printf 'Validation fixture retained: %s\n' "$fixture_dir"
 printf '{}\n' > "$fixture_dir/test-config.json"
 version=$(awk -F= '$1=="version" {print $2}' "$bundle/BUILD-INFO")
-binary_hash=$(sha256sum "$bundle/V2bX" | cut -d ' ' -f 1)
+binary_hash=$(sha256sum "$bundle/v2bxss" | cut -d ' ' -f 1)
 manifest_hash=$(sha256sum "$bundle/SHA256SUMS" | cut -d ' ' -f 1)
 args=(--bundle "$bundle" --version "$version" --binary-sha256 "$binary_hash" --manifest-sha256 "$manifest_hash" --config "$fixture_dir/test-config.json")
 passed=0
@@ -49,7 +49,7 @@ check_rejected 'manifest path traversal rejected' bash "$script_dir/install-test
 check_rejected 'rollback outside fixed backup path rejected' bash "$script_dir/rollback-test-node.sh" --backup "$fixture_dir"
 check_rejected 'missing rollback backup rejected' bash "$script_dir/rollback-test-node.sh" --backup "$fixture_dir/no-such-backup"
 check_rejected 'rollback conflicting modes rejected' bash "$script_dir/rollback-test-node.sh" --backup "$fixture_dir" --apply --dry-run
-for protected in /opt/v2bx-audit-test /etc/v2bx-audit-test /etc/systemd/system/V2bX-audit-test.service /var/backups/v2bx-audit-test; do
+for protected in /etc/v2bxss /etc/v2bxss /etc/systemd/system/v2bxss.service /var/backups/v2bxss; do
     [[ ! -e "$protected" && ! -L "$protected" ]] || { echo 'Unexpected installation target creation' >&2; exit 1; }
 done
 passed=$((passed + 1)); echo 'PASS: no installation/service/backup paths created'

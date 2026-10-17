@@ -53,7 +53,7 @@ build_tags='sing xray hysteria2 with_quic with_grpc with_utls with_wireguard wit
     GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOOS=linux GOARCH="$architecture" CGO_ENABLED=0 GOEXPERIMENT=jsonv2 \
         go build -trimpath -tags "$build_tags" \
         -ldflags "-X github.com/InazumaV/V2bX/cmd.version=$version -s -w -buildid=" \
-        -o "$output_dir/V2bX" .
+        -o "$output_dir/v2bxss" .
 )
 {
     printf 'version=%s\n' "$version"
@@ -67,13 +67,14 @@ build_tags='sing xray hysteria2 with_quic with_grpc with_utls with_wireguard wit
 } > "$output_dir/BUILD-INFO"
 install -m 0755 "$script_dir/install-test-node.sh" "$output_dir/install-test-node.sh"
 install -m 0755 "$script_dir/rollback-test-node.sh" "$output_dir/rollback-test-node.sh"
-install -m 0644 "$script_dir/V2bX-audit-test.service" "$output_dir/V2bX-audit-test.service"
+install -m 0644 "$script_dir/v2bxss.service" "$output_dir/v2bxss.service"
+install -m 0755 "$source_dir/install.sh" "$output_dir/v2bxss-manager"
 (
     cd -- "$output_dir"
-    sha256sum --binary V2bX BUILD-INFO install-test-node.sh rollback-test-node.sh V2bX-audit-test.service > SHA256SUMS
+    sha256sum --binary v2bxss BUILD-INFO install-test-node.sh rollback-test-node.sh v2bxss.service v2bxss-manager > SHA256SUMS
 )
 printf 'Bundle built: %s\n' "$output_dir"
 printf 'Binary SHA256: '
-sha256sum "$output_dir/V2bX"
+sha256sum "$output_dir/v2bxss"
 printf 'Manifest SHA256: '
 sha256sum "$output_dir/SHA256SUMS"

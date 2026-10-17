@@ -16,7 +16,8 @@ printf 'Entry-point fixture retained: %s\n' "$fixture_dir"
 mkdir "$fixture_dir/bin" "$fixture_dir/no-go-bin" "$fixture_dir/source" "$fixture_dir/logs"
 fixture_source="$fixture_dir/source"
 mkdir -p "$fixture_source/tools/packaging"
-cp "$script_dir/build-local-bundle.sh" "$script_dir/rollback-test-node.sh" "$script_dir/V2bX-audit-test.service" "$fixture_source/tools/packaging/"
+cp "$script_dir/build-local-bundle.sh" "$script_dir/rollback-test-node.sh" "$script_dir/v2bxss.service" "$fixture_source/tools/packaging/"
+cp "$entrypoint" "$fixture_source/install.sh"
 printf 'module fixture.invalid/v2bxss\n\ngo 1.25\n' > "$fixture_source/go.mod"
 printf '// empty fixture checksum file\n' > "$fixture_source/go.sum"
 printf 'package main\nfunc main() {}\n' > "$fixture_source/main.go"
@@ -107,13 +108,13 @@ cat > "$fixture_dir/bin/systemctl" <<'SYSTEMCTL_STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'systemctl %s\n' "$*" >> "$ENTRY_FIXTURE_LOG/services"
-[[ "${*: -1}" == V2bX-audit-test.service ]] || exit 95
+[[ "${*: -1}" == v2bxss.service ]] || exit 95
 SYSTEMCTL_STUB
 cat > "$fixture_dir/bin/journalctl" <<'JOURNALCTL_STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'journalctl %s\n' "$*" >> "$ENTRY_FIXTURE_LOG/services"
-[[ "$*" == '--unit V2bX-audit-test.service --no-pager --lines 100 --output short-iso' ]] || exit 96
+[[ "$*" == '--unit v2bxss.service --no-pager --lines 100 --output short-iso' ]] || exit 96
 JOURNALCTL_STUB
 cat > "$fixture_dir/bin/uname" <<'UNAME_STUB'
 #!/usr/bin/env bash
@@ -192,8 +193,8 @@ reject 'dependency changes to pinned source are rejected' 'Dependency preparatio
 
 bash "$entrypoint" status > "$fixture_dir/status.log"
 bash "$entrypoint" logs > "$fixture_dir/logs.log"
-grep -Fxq 'systemctl status --no-pager --full V2bX-audit-test.service' "$ENTRY_FIXTURE_LOG/services"
-grep -Fxq 'journalctl --unit V2bX-audit-test.service --no-pager --lines 100 --output short-iso' "$ENTRY_FIXTURE_LOG/services"
+grep -Fxq 'systemctl status --no-pager --full v2bxss.service' "$ENTRY_FIXTURE_LOG/services"
+grep -Fxq 'journalctl --unit v2bxss.service --no-pager --lines 100 --output short-iso' "$ENTRY_FIXTURE_LOG/services"
 pass 'read-only status and logs address only the isolated service (mocked)'
 service_calls_before=$(awk 'END {print NR}' "$ENTRY_FIXTURE_LOG/services")
 for mode in start restart stop; do
@@ -203,9 +204,9 @@ done
 [[ $(awk 'END {print NR}' "$ENTRY_FIXTURE_LOG/services") == "$service_calls_before" ]]
 pass 'all state-changing management commands default to a plan'
 for mode in start restart stop; do bash "$entrypoint" "$mode" --apply; done
-grep -Fxq 'systemctl start V2bX-audit-test.service' "$ENTRY_FIXTURE_LOG/services"
-grep -Fxq 'systemctl restart V2bX-audit-test.service' "$ENTRY_FIXTURE_LOG/services"
-grep -Fxq 'systemctl stop V2bX-audit-test.service' "$ENTRY_FIXTURE_LOG/services"
+grep -Fxq 'systemctl start v2bxss.service' "$ENTRY_FIXTURE_LOG/services"
+grep -Fxq 'systemctl restart v2bxss.service' "$ENTRY_FIXTURE_LOG/services"
+grep -Fxq 'systemctl stop v2bxss.service' "$ENTRY_FIXTURE_LOG/services"
 pass 'explicit management commands address only the isolated service (mocked)'
 reject 'install flags cannot leak into management commands' 'Install options cannot be used' bash "$entrypoint" restart --commit "$fixture_commit" --apply
 reject 'read-only commands reject apply' 'status is read-only' bash "$entrypoint" status --apply

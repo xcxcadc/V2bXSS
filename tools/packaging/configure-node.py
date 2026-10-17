@@ -159,7 +159,7 @@ def build_node(config):
                     raise ValueError("证书和私钥必须是已存在的绝对路径")
                 cert[field] = str(path)
         else:
-            directory = pathlib.Path("/etc/v2bx-audit-test")
+            directory = pathlib.Path("/etc/v2bxss")
             cert.update(CertFile=str(directory / f"{core}-{node_id}.crt"),
                         KeyFile=str(directory / f"{core}-{node_id}.key"), Email=ask("证书申请邮箱"))
     elif tls_mode != "3" or kind in ("trojan", "hysteria", "hysteria2", "tuic", "anytls"):
@@ -167,7 +167,7 @@ def build_node(config):
     options["CertConfig"] = cert
     config["Nodes"].append({
         "ApiConfig": {"ApiHost": host, "ApiKey": key, "NodeID": node_id, "NodeType": kind, "Timeout": 30,
-                      "SecurityAuditCachePath": f"/etc/v2bx-audit-test/audit-{core}-{node_id}-{len(config['Nodes'])}.json"},
+                      "SecurityAuditCachePath": f"/etc/v2bxss/audit-{core}-{node_id}-{len(config['Nodes'])}.json"},
         "Options": options,
     })
     validate(config)

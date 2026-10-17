@@ -4,16 +4,27 @@ umask 077
 
 # This entry installs this fork only. It never runs an upstream installer.
 repository='https://github.com/xcxcadc/V2bXSS.git'
-service='V2bX-audit-test.service'
+service='v2bxss.service'
 
 # The downloaded entry is self-contained: opening the menu needs no checkout,
 # Go installation, network request or root privileges.
-menu_base=/opt/v2bx-audit-test
-menu_config=/etc/v2bx-audit-test/config.json
+menu_base=/etc/v2bxss
+menu_config=/etc/v2bxss/config.json
 menu_branch=dev_new
 
-menu_require_host() {
+manager_require_target() {
     need_linux_root
+    for target in /etc /usr /usr/local /usr/local/bin "$menu_base" "$menu_base/v2bxss" "$menu_base/manager" "$menu_base/toolchains" "$menu_config"; do
+        [[ ! -L "$target" ]] || die "安装路径不能是符号链接：$target"
+    done
+    [[ ! -L /usr/local/bin/v2bxss ]] || die '/usr/local/bin/v2bxss 已有符号链接，请先检查'
+    if [[ -e /usr/local/bin/v2bxss ]] && ! grep -Fq '# V2bXSS menu launcher' /usr/local/bin/v2bxss; then
+        die '/usr/local/bin/v2bxss 已被其他程序使用'
+    fi
+}
+
+menu_require_host() {
+    manager_require_target
     need_command systemctl
     [[ -d /run/systemd/system ]] || die '需要使用 systemd 的 Linux 服务器'
     case "$(uname -m)" in
@@ -21,13 +32,52 @@ menu_require_host() {
         aarch64|arm64) menu_arch=arm64 ;;
         *) die '当前支持 Linux amd64 / arm64' ;;
     esac
-    for target in "$menu_base" "$menu_base/manager" "$menu_base/toolchains" /etc/v2bx-audit-test "$menu_config"; do
-        [[ ! -L "$target" ]] || die "安装路径不能是符号链接：$target"
-    done
-    [[ ! -L /usr/local/bin/v2bxss ]] || die '/usr/local/bin/v2bxss 已有符号链接，请先检查'
-    if [[ -e /usr/local/bin/v2bxss ]] && ! grep -Fq '# V2bXSS menu launcher' /usr/local/bin/v2bxss; then
-        die '/usr/local/bin/v2bxss 已被其他程序使用'
+}
+
+# Install the actual manager before its shortcut. This path also works without
+# a compiler, source checkout, node binary or network, including after failure.
+manager_install() {
+    local source=$1 staged backup=''
+    manager_require_target
+    for dep in install mktemp mv cmp; do need_command "$dep"; done
+    [[ -f "$source" ]] || die '管理脚本源文件不存在'
+    install -d -m 0700 "$menu_base"
+    if [[ -f "$menu_base/v2bxss" ]] && ! cmp -s "$source" "$menu_base/v2bxss"; then
+        backup="/var/backups/v2bxss/manager-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+        for target in /var /var/backups /var/backups/v2bxss "$backup"; do
+            [[ ! -L "$target" ]] || die "备份路径不能是符号链接：$target"
+        done
+        install -d -m 0700 "$backup"
+        cp -a "$menu_base/v2bxss" "$backup/v2bxss"
+        [[ ! -f /usr/local/bin/v2bxss ]] || cp -a /usr/local/bin/v2bxss "$backup/launcher"
+        printf '管理脚本备份：%s\n' "$backup"
     fi
+    if ! cmp -s "$source" "$menu_base/v2bxss"; then
+        staged=$(mktemp "$menu_base/.manager.XXXXXXXX")
+        install -m 0700 "$source" "$staged"
+        mv -Tf "$staged" "$menu_base/v2bxss"
+    fi
+    install -d -m 0755 /usr/local/bin
+    staged=$(mktemp /usr/local/bin/.v2bxss.XXXXXXXX)
+    cat > "$staged" <<'LAUNCHER'
+#!/usr/bin/env bash
+# V2bXSS menu launcher
+manager=/etc/v2bxss/v2bxss
+if [[ ! -f "$manager" ]]; then
+    echo 'V2bXSS 管理脚本缺失；节点服务不受此提示影响。请重新运行修复命令：' >&2
+    echo 'wget -N https://raw.githubusercontent.com/xcxcadc/V2bXSS/dev_new/install.sh && bash install.sh repair' >&2
+    exit 1
+fi
+exec bash "$manager" "$@"
+LAUNCHER
+    chmod 0755 "$staged"
+    if cmp -s "$staged" /usr/local/bin/v2bxss; then
+        # Retain the harmless staged launcher rather than deleting user files.
+        mv -Tf "$staged" "$menu_base/launcher.last-check"
+    else
+        mv -Tf "$staged" /usr/local/bin/v2bxss
+    fi
+    [[ -f "$menu_base/v2bxss" ]] || die '管理脚本安装校验失败'
 }
 
 menu_stable_service() {
@@ -120,15 +170,9 @@ menu_prepare_go() {
 }
 
 menu_save_manager() {
-    install -m 0700 "$menu_source/install.sh" "$menu_base/manager/install.sh"
+    manager_install "$menu_source/install.sh"
+    install -d -m 0700 "$menu_base/manager"
     install -m 0600 "$menu_source/tools/packaging/configure-node.py" "$menu_base/manager/configure-node.py"
-    [[ ! -L /usr/local/bin/v2bxss ]] || die '/usr/local/bin/v2bxss 已有符号链接，请先检查'
-    if [[ -e /usr/local/bin/v2bxss ]] && ! grep -Fq '# V2bXSS menu launcher' /usr/local/bin/v2bxss; then
-        die '/usr/local/bin/v2bxss 已被其他程序使用'
-    fi
-    install -d -m 0755 /usr/local/bin
-    printf '#!/usr/bin/env bash\n# V2bXSS menu launcher\nexec bash /opt/v2bx-audit-test/manager/install.sh "$@"\n' > "$menu_work/v2bxss"
-    install -m 0755 "$menu_work/v2bxss" /usr/local/bin/v2bxss
 }
 
 menu_new_config() {
@@ -146,6 +190,9 @@ menu_new_config() {
 }
 
 menu_install_latest() {
+    if [[ ! -f "$menu_config" && -f /etc/v2bx-audit-test/config.json ]]; then
+        die '检测到旧版安装，请先选择菜单 12 迁移，避免重复节点或覆盖原配置'
+    fi
     menu_fetch_source
     local args=() installed_commit=''
     if [[ -f "$menu_config" ]]; then
@@ -176,6 +223,16 @@ menu_install_latest() {
     echo '后台托管审计规则自动同步，无需每次修改规则后重启节点。'
 }
 
+menu_migrate() {
+    local answer
+    echo '将旧版独立安装迁移到 /etc/v2bxss，保留旧配置和回滚资料。需要切换服务一次。'
+    read -r -p '确认迁移？[y/N]：' answer || return 1
+    [[ "$answer" == y || "$answer" == Y ]] || { echo '已取消'; return; }
+    menu_fetch_source
+    bash "$menu_source/tools/packaging/migrate-layout.sh" --apply
+    menu_save_manager
+}
+
 menu_configure() {
     [[ -f "$menu_config" ]] || die '请先选择 1 完成安装'
     menu_fetch_source
@@ -189,7 +246,7 @@ menu_configure() {
         [[ "$answer" == y || "$answer" == Y ]] || { echo '已取消'; return; }
     fi
     local backup
-    backup="/var/backups/v2bx-audit-test/config-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    backup="/var/backups/v2bxss/config-$(date -u +%Y%m%dT%H%M%SZ)-$$"
     install -d -m 0700 "$backup"
     cp -a "$menu_config" "$backup/config.json"
     printf '配置备份：%s\n' "$backup/config.json"
@@ -208,7 +265,7 @@ menu_rollback() {
     current=$(realpath -e "$menu_base/current")
     # Pick only a backup for the currently installed release, never an older
     # unrelated snapshot or a config-only checkpoint.
-    for backup in /var/backups/v2bx-audit-test/*; do
+    for backup in /var/backups/v2bxss/*; do
         [[ -d "$backup" && ! -L "$backup" && -f "$backup/installed-release" && -f "$backup/previous-release" ]] || continue
         if [[ "$(<"$backup/installed-release")" == "$current" ]]; then selected=$backup; fi
     done
@@ -244,7 +301,7 @@ menu_action() {
     esac
     menu_require_host
     case "$1" in
-        1|2|3) menu_dependencies ;;
+        1|2|3|12) menu_dependencies ;;
     esac
     case "$1" in
         1) menu_install_latest ;;
@@ -260,6 +317,7 @@ menu_action() {
             fi
             ;;
         10) menu_rollback ;;
+        12) menu_migrate ;;
         *) die '无效菜单操作' ;;
     esac
 }
@@ -274,27 +332,31 @@ interactive_menu() {
         printf '仓库：xcxcadc/V2bXSS · dev_new\n'
         printf ' 1. 安装 / 更新到最新二开版本\n 2. 添加对接节点（保留已有节点）\n 3. 导入 / 替换配置（自动备份）\n'
         printf ' 4. 启动服务\n 5. 停止服务\n 6. 重启服务\n 7. 查看运行状态\n 8. 查看最近日志\n'
-        printf ' 9. 开启 / 关闭开机自启\n10. 回滚上一版本\n11. 查看实时运行 / 连接日志（Ctrl+C 返回）\n 0. 退出\n'
+        printf ' 9. 开启 / 关闭开机自启\n10. 回滚上一版本\n11. 查看实时运行 / 连接日志（Ctrl+C 返回）\n12. 迁移旧版独立安装到 /etc/v2bxss\n 0. 退出\n'
         printf '管理服务：%s\n' "$service"
-        read -r -p '请选择 [0-11]：' choice || return 0
+        read -r -p '请选择 [0-12]：' choice || return 0
         case "$choice" in
             0) return 0 ;;
-            [1-9]|10|11)
+            [1-9]|10|11|12)
                 # A separate shell preserves errexit inside every action even
                 # when the menu catches its exit code to stay open on failure.
                 bash "${BASH_SOURCE[0]}" __menu_action "$choice" || echo '操作未完成；请查看上方错误。菜单仍可继续使用。'
                 ;;
-            *) echo '请输入 0-11。' ;;
+            *) echo '请输入 0-12。' ;;
         esac
     done
 }
 
 usage() {
     cat <<'USAGE'
-Build this V2bXSS fork and manage only the isolated V2bX-audit-test service.
+Build this V2bXSS fork and manage the independent v2bxss.service.
 
 Interactive (recommended): bash install.sh
 Reopen after installation: v2bxss
+Repair only the menu/shortcut, with no build, network or service restart:
+  bash install.sh repair
+All new fork files use /etc/v2bxss; the node executable is current/v2bxss.
+Menu option 12 migrates an old independent audit-test installation with backup.
 The menu prepares dependencies, resolves this fork's latest commit, prompts for
 node configuration and installs/starts it. Existing configuration is preserved.
 The options below are the optional advanced/non-interactive interface.
@@ -317,7 +379,7 @@ Without --download-deps the full module cache must already be available.
 Build/source artifacts are retained in a printed temporary directory, even in dry run.
 Actual installation needs Linux root and systemd. No prebuilt Release is assumed.
 
-Management (only V2bX-audit-test.service):
+Management (only v2bxss.service):
   bash install.sh status
   bash install.sh logs
   bash install.sh logs -f [--lines 100]
@@ -325,7 +387,8 @@ Management (only V2bX-audit-test.service):
   bash install.sh start|restart|stop [--apply | --dry-run]
 Installed shortcut: v2bxss logs -f (menu option 11). Ctrl+C stops viewing only.
 Log flags: -f/--follow, -n/--lines 0..10000, --service
-V2bX-audit-test.service (default) or V2bX.service (original-service upgrade).
+v2bxss.service (default), V2bX-audit-test.service (old independent layout)
+or V2bX.service (original-service upgrade).
 The viewer uses current journal output; it does not enable access/debug logging
 or collect every connection. Audit matches remain in the panel evidence page.
 State-changing management commands print a plan unless --apply is explicit.
@@ -341,7 +404,16 @@ need_linux_root() {
 }
 
 if (($# == 0)) || [[ "${1:-}" == menu ]]; then
+    if [[ $(uname -s) == Linux && $(id -u) == 0 ]]; then
+        manager_install "${BASH_SOURCE[0]}"
+    fi
     interactive_menu
+    exit 0
+fi
+if [[ "${1:-}" == repair ]]; then
+    [[ $# == 1 ]] || die 'repair 不接受其他参数'
+    manager_install "${BASH_SOURCE[0]}"
+    echo '管理入口已修复：v2bxss；脚本：/etc/v2bxss/v2bxss。未重启或修改节点配置。'
     exit 0
 fi
 if [[ "${1:-}" == __menu_action ]]; then
@@ -403,8 +475,8 @@ if $has_log_option; then
 fi
 [[ "$log_lines" =~ ^([0-9]{1,4}|10000)$ ]] || die '--lines requires a number from 0 to 10000'
 case "$log_service" in
-    V2bX-audit-test.service|V2bX.service) ;;
-    *) die '--service supports only V2bX-audit-test.service or V2bX.service' ;;
+    v2bxss.service|V2bX-audit-test.service|V2bX.service) ;;
+    *) die '--service supports only v2bxss.service, V2bX-audit-test.service or V2bX.service' ;;
 esac
 
 if [[ "$action" != install ]]; then
@@ -510,7 +582,7 @@ fi
 
 bundle="$work_dir/bundle"
 bash "$checkout/tools/packaging/build-local-bundle.sh" --source "$checkout" --output "$bundle" --version "$version" --arch "$architecture"
-binary_hash=$(sha256sum "$bundle/V2bX" | cut -d ' ' -f 1)
+binary_hash=$(sha256sum "$bundle/v2bxss" | cut -d ' ' -f 1)
 manifest_hash=$(sha256sum "$bundle/SHA256SUMS" | cut -d ' ' -f 1)
 install_args=(--bundle "$bundle" --version "$version" --binary-sha256 "$binary_hash" --manifest-sha256 "$manifest_hash")
 if [[ -n "$new_config" ]]; then install_args+=(--config "$new_config"); fi
