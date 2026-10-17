@@ -291,6 +291,10 @@ func exchange(out adapter.Outbound, network, target string) error {
 		return err
 	}
 	defer c.Close()
+	// Some QUIC datagram adapters do not implement SetDeadline. Close on
+	// context cancellation as well so an expected dropped reply stays bounded.
+	stopClose := context.AfterFunc(ctx, func() { c.Close() })
+	defer stopClose()
 	c.SetDeadline(time.Now().Add(2 * time.Second))
 	payload := bytes.Repeat([]byte("audit-echo-fixture|"), 16)
 	if _, err = c.Write(payload); err != nil {
@@ -379,7 +383,9 @@ func TestProtocolAuditRoundTrip(t *testing.T) {
 					}
 					t.Logf("%s TCP/UDP passed", phase)
 				}
-				// Domain rules are verified before DNS; no public DNS/network request.
+				// Require an authenticated domain-match report as well as a rejected
+				// exchange. A tracker-based core may still attempt DNS after Close;
+				// this probe does not assert that no DNS query is made.
 				version := f.policy("block", "domain_suffix", "example.invalid")
 				eventually(t, "domain policy applied", func() bool { return securityaudit.Version(tag) == version })
 				_, port, _ := net.SplitHostPort(tcpTarget)
