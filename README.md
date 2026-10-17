@@ -102,13 +102,20 @@ wget -N https://raw.githubusercontent.com/xcxcadc/V2bXSS/dev_new/install.sh && b
 程序自动下载依赖并编译，首次安装需要数分钟；不需要自行安装 Go。
 支持 Debian/Ubuntu、使用 dnf/yum 的发行版，Linux amd64/arm64 和 systemd。
 
-安装完成后，直接输入以下命令重新打开管理菜单：
+运行安装命令即显示管理菜单，首次安装完成后也返回同一菜单。以后输入：
 
 ```sh
-v2bxss
+v2bx
 ```
 
 菜单包含安装/更新、追加节点、导入配置、启停/重启、状态、日志、开机自启和回滚。
+每个选项单独一行，终端内使用绿色数字；协议、内核、TLS 分步显示子菜单。
+单个字段输错时就地重填，不必重输面板地址和密钥。`v2bxss` 入口仍可使用。
+配置管理选 **3**，新增节点选 **11**。启动失败会保留新配置，提供修改、重试、
+查日志及主动恢复旧配置的菜单；不会自动用旧配置覆盖本次输入。
+草稿和修改前文件在 `/etc/v2bxss/manager/drafts/`，仅 root 可读；
+退出后可用 **3 → 3** 继续修正。错误配置可能使节点暂不可用，恢复旧配置需主动确认。
+程序版本升级失败的自动回滚保护仍保留，与配置编辑修正分开处理。
 卸载选择 **13**，或执行 `v2bxss uninstall --apply` 并输入 `UNINSTALL`；
 只停止/移除此二开服务及管理入口，完整目录移至 `/var/backups/v2bxss/uninstall-*`，
 不会永久删除配置、证书、程序，也不处理原版 V2bX、面板或防火墙。
@@ -119,7 +126,10 @@ v2bxss
 
 本二开统一存放在 `/etc/v2bxss`，管理脚本为 `/etc/v2bxss/v2bxss`，
 节点程序为 `/etc/v2bxss/current/v2bxss`，配置为 `/etc/v2bxss/config.json`，
-独立服务为 `v2bxss.service`。`/usr/local/bin/v2bxss` 只是管理快捷入口。
+独立服务为 `v2bxss.service`。`/usr/local/bin/v2bx` 和 `v2bxss` 是管理快捷入口。
+保留上游 `/usr/bin/v2bx`、`/usr/bin/V2bX` 文件；正常 PATH 优先使用二开入口。
+若 shell 缓存了旧路径，执行 `hash -r`；若 `/usr/local/bin/v2bx` 已被其他程序占用，
+安装器保留该文件并提示改用 `v2bxss`。卸载只移走属于本二开的快捷入口。
 若原有上游服务正在使用相同端口，应先处理端口冲突；菜单不会自动停掉上游服务。
 工具链安装在自己的目录，不替换系统 Go。高级固定提交/离线安装入口仍保留，见
 [完整安装说明](tools/packaging/README.zh-CN.md)。

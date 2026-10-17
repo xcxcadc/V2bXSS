@@ -88,6 +88,35 @@ class ConfigurationTests(unittest.TestCase):
                 configure.read_config(source)
             self.assertNotIn("sensitive-test-secret", str(caught.exception))
 
+    def test_invalid_fields_retry_without_losing_previous_input(self):
+        data = {"Cores": [], "Nodes": []}
+        answers = ["not-a-url", "https://panel.example", "fixture-secret", "99", "vmess",
+                   "bad-id", "-1", "2", "invalid-core", "xray", "99", "3"]
+        with patch.object(configure, "ask", side_effect=answers) as ask, contextlib.redirect_stdout(io.StringIO()) as output:
+            configure.build_node(data)
+        self.assertEqual(data["Nodes"][0]["ApiConfig"]["ApiKey"], "fixture-secret")
+        self.assertEqual(data["Nodes"][0]["ApiConfig"]["NodeID"], 2)
+        self.assertEqual(sum("密钥" in call.args[0] for call in ask.call_args_list), 1)
+        self.assertNotIn("fixture-secret", output.getvalue())
+        self.assertIn(" 1. vmess\n", output.getvalue())
+        self.assertIn(" 2. vless\n", output.getvalue())
+
+    def test_cancel_does_not_append_partial_node_or_core(self):
+        data = sample()
+        before = json.loads(json.dumps(data))
+        answers = ["https://panel.example", "fixture-secret", "vmess", "2", "xray", "0"]
+        with patch.object(configure, "ask", side_effect=answers), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(KeyboardInterrupt):
+                configure.build_node(data)
+        self.assertEqual(before, data)
+
+    def test_duplicate_id_can_be_corrected_in_place(self):
+        data = sample()
+        answers = ["https://panel.example", "fixture-secret", "hysteria2", "1", "2", "hysteria2", "2", "node.example", "ops@example.invalid"]
+        with patch.object(configure, "ask", side_effect=answers), contextlib.redirect_stdout(io.StringIO()):
+            configure.build_node(data)
+        self.assertEqual([node["ApiConfig"]["NodeID"] for node in data["Nodes"]], [1, 2])
+
     def test_validation_rejects_missing_fields_and_wrong_core(self):
         mutations = [lambda d: d.update(Nodes=[]), lambda d: d["Nodes"][0]["ApiConfig"].update(NodeID=True),
                      lambda d: d["Nodes"][0]["ApiConfig"].update(ApiKey=""),

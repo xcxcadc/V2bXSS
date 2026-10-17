@@ -10,6 +10,8 @@ import re
 import sys
 from urllib.parse import urlsplit
 
+MENU_CONFIG_VERSION = 2
+
 
 NODE_CORES = {
     "vmess": ("xray", "sing"), "vless": ("xray", "sing"),
@@ -119,52 +121,97 @@ def ask(prompt, default="", secret=False):
         print("此项不能为空。")
 
 
+def checked(prompt, check, default="", secret=False):
+    while True:
+        try:
+            return check(ask(prompt, default, secret=secret))
+        except ValueError as error:
+            print(f"输入有误：{error}；请重新填写此项，之前的内容保留。")
+
+
+def choose(title, choices, default="1"):
+    """One choice per line, like the original manager; 0 cancels this wizard."""
+    green = "\033[0;32m" if sys.stdout.isatty() and "NO_COLOR" not in os.environ else ""
+    reset = "\033[0m" if green else ""
+    print(f"\n---------- {title} ----------")
+    for index, (value, label) in enumerate(choices, 1):
+        print(f" {green}{index}.{reset} {label}")
+    print(f" {green}0.{reset} 取消本次添加，返回管理菜单")
+    while True:
+        selection = ask("请选择", default).lower()
+        if selection == "0":
+            raise KeyboardInterrupt
+        for index, (value, _) in enumerate(choices, 1):
+            if selection in (str(index), value):
+                return value
+        print("无效选择，请输入上方的数字。")
+
+
+def positive_id(value):
+    if not value.isascii() or not value.isdecimal() or int(value) < 1:
+        raise ValueError("节点 ID 必须是正整数")
+    return int(value)
+
+
+def cert_domain(value):
+    value = value.lower()
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", value):
+        raise ValueError("证书域名格式无效")
+    return value
+
+
+def cert_path(value):
+    path = pathlib.Path(value)
+    if not path.is_absolute() or not path.is_file():
+        raise ValueError("证书和私钥必须是已存在的绝对路径")
+    return str(path)
+
+
 def build_node(config):
-    host = panel_url(ask("面板 API 地址（不是订阅地址）"))
+    host = checked("面板 API 地址（不是订阅地址）", panel_url)
     key = ask("节点 API 密钥（输入不回显）", secret=True)
     kinds = list(NODE_CORES)
-    print("节点类型：" + "  ".join(f"{i + 1}.{name}" for i, name in enumerate(kinds)))
-    selection = ask("选择序号或类型", "5")
-    kind = kinds[int(selection) - 1] if selection.isdigit() and 1 <= int(selection) <= len(kinds) else selection.lower()
-    if kind not in NODE_CORES:
-        raise ValueError("不支持的节点类型")
-    node_id_text = ask("面板中的节点 ID")
-    if not node_id_text.isdecimal() or int(node_id_text) < 1:
-        raise ValueError("节点 ID 必须是正整数")
-    node_id = int(node_id_text)
-    core = ask("内核（" + "/".join(NODE_CORES[kind]) + "）", NODE_CORES[kind][0])
-    if core not in NODE_CORES[kind]:
-        raise ValueError("该节点类型不支持所选内核")
+    kind = choose("选择节点协议", [(kind, kind) for kind in kinds], "5")
+
+    def unique_id(value):
+        node_id = positive_id(value)
+        for node in config["Nodes"]:
+            api = api_of(node)
+            existing_kind = api["NodeType"].lower()
+            existing_kind = {"v2ray": "vmess", "hysteria2": "hysteria"}.get(existing_kind, existing_kind)
+            current_kind = "hysteria" if kind == "hysteria2" else kind
+            if panel_url(api["ApiHost"]).lower() == host.lower() and existing_kind == current_kind and api["NodeID"] == node_id:
+                raise ValueError("此面板/协议/节点 ID 已存在，请填写新节点的 ID")
+        return node_id
+
+    node_id = checked("面板中的节点 ID", unique_id)
+    core = choose("选择运行内核", [(core, {"sing": "sing-box", "xray": "Xray", "hysteria2": "Hysteria2"}[core]) for core in NODE_CORES[kind]])
     name = core
     existing = next((item for item in config["Cores"] if item.get("Type") == core), None)
     if existing:
         name = existing.get("Name") or core
-    else:
-        config["Cores"].append({"Type": core})
     options = {"Core": core, "CoreName": name, "ListenIP": "0.0.0.0", "SendIP": "0.0.0.0"}
     if core == "sing":
         options["EnableSniff"] = True
-    print("TLS：1.已有证书文件  2.自动申请 HTTP 证书（域名已解析，80 端口可用）  3.不配置 TLS（仅无 TLS / Reality 等场景）")
-    tls_mode = ask("选择 TLS 方式", "1" if kind in ("trojan", "hysteria", "hysteria2", "tuic", "anytls") else "3")
+    tls_required = kind in ("trojan", "hysteria", "hysteria2", "tuic", "anytls")
+    tls_choices = [("file", "使用已有证书和私钥文件"), ("http", "自动申请 HTTP 证书（域名已解析，80 端口可用）")]
+    if not tls_required:
+        tls_choices.append(("none", "不配置 TLS（无 TLS / Reality 等场景）"))
+    tls_mode = choose("证书 / TLS 配置", tls_choices, "1" if tls_required else "3")
     cert = {"CertMode": "none"}
-    if tls_mode in ("1", "2"):
-        domain = ask("节点证书域名").lower()
-        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", domain):
-            raise ValueError("证书域名格式无效")
-        cert = {"CertMode": "file" if tls_mode == "1" else "http", "CertDomain": domain}
-        if tls_mode == "1":
+    if tls_mode in ("file", "http"):
+        domain = checked("节点证书域名", cert_domain)
+        cert = {"CertMode": tls_mode, "CertDomain": domain}
+        if tls_mode == "file":
             for field, prompt in (("CertFile", "证书文件绝对路径"), ("KeyFile", "私钥文件绝对路径")):
-                path = pathlib.Path(ask(prompt))
-                if not path.is_absolute() or not path.is_file():
-                    raise ValueError("证书和私钥必须是已存在的绝对路径")
-                cert[field] = str(path)
+                cert[field] = checked(prompt, cert_path)
         else:
             directory = pathlib.Path("/etc/v2bxss")
             cert.update(CertFile=str(directory / f"{core}-{node_id}.crt"),
                         KeyFile=str(directory / f"{core}-{node_id}.key"), Email=ask("证书申请邮箱"))
-    elif tls_mode != "3" or kind in ("trojan", "hysteria", "hysteria2", "tuic", "anytls"):
-        raise ValueError("所选节点类型需要 TLS，请使用证书文件或自动申请")
     options["CertConfig"] = cert
+    if not existing:
+        config["Cores"].append({"Type": core})
     config["Nodes"].append({
         "ApiConfig": {"ApiHost": host, "ApiKey": key, "NodeID": node_id, "NodeType": kind, "Timeout": 30,
                       "SecurityAuditCachePath": f"/etc/v2bxss/audit-{core}-{node_id}-{len(config['Nodes'])}.json"},
@@ -199,11 +246,16 @@ def main():
     importer = sub.add_parser("import")
     importer.add_argument("--input", required=True)
     importer.add_argument("--output", required=True)
+    validator = sub.add_parser("validate")
+    validator.add_argument("--input", required=True)
     args = parser.parse_args()
     if args.action == "go-compatible":
         return 0 if go_compatible(args.current, args.required) else 1
     if args.action == "go-download":
         go_download(args.metadata, args.arch, args.required)
+        return 0
+    if args.action == "validate":
+        read_config(args.input)
         return 0
     if args.action == "import":
         config = read_config(args.input)
@@ -211,7 +263,7 @@ def main():
         config = copy.deepcopy(read_config(args.existing)) if args.existing else {"Log": {"Level": "info"}, "Cores": [], "Nodes": []}
         while True:
             build_node(config)
-            if ask("继续添加另一个节点？y/N", "N").lower() != "y":
+            if choose("节点信息已保存", [("y", "继续添加下一个节点"), ("n", "完成填写并应用配置")], "2") != "y":
                 break
     write_new(args.output, config)
     return 0

@@ -100,7 +100,7 @@ if [[ "$scenario" == manager-only ]]; then mv /etc/systemd/system/v2bxss.service
 sha256sum /etc/v2bxss/config.json /etc/v2bxss/tls.key /etc/v2bxss/current/v2bxss > "$fixture/data.sha"
 sha256sum /etc/V2bX/config.json /etc/systemd/system/V2bX.service /opt/other-app/external.pem /var/backups/v2bxss/previous/marker > "$fixture/unrelated.sha"
 assert_installed() {
-    [[ -f /etc/v2bxss/v2bxss && -f /usr/local/bin/v2bxss ]]
+    [[ -f /etc/v2bxss/v2bxss && -f /usr/local/bin/v2bxss && -f /usr/local/bin/v2bx ]]
     sha256sum --check "$fixture/data.sha" >/dev/null
     [[ $(<"$fixture/active") == true && $(<"$fixture/enabled") == true ]]
 }
@@ -142,7 +142,7 @@ case "$scenario" in
             printf '13\nUNINSTALL\n' | bash "$entry" > "$fixture/result.log"
             ! grep -Fq '菜单仍可继续使用' "$fixture/result.log"
         else printf 'UNINSTALL\n' | bash "$entry" uninstall --apply > "$fixture/result.log"; fi
-        [[ ! -e /etc/v2bxss && ! -e /etc/systemd/system/v2bxss.service && ! -e /usr/local/bin/v2bxss ]]
+        [[ ! -e /etc/v2bxss && ! -e /etc/systemd/system/v2bxss.service && ! -e /usr/local/bin/v2bxss && ! -e /usr/local/bin/v2bx ]]
         [[ $(<"$fixture/active") == false && $(<"$fixture/enabled") == false ]]
         backup=$(sed -n 's/^卸载备份：//p' "$fixture/result.log")
         [[ -d "$backup/installation" && -f "$backup/complete" && $(stat -c %a "$backup") == 700 ]]
@@ -165,7 +165,7 @@ case "$scenario" in
             [[ ! -e /etc/v2bxss ]]
             printf 'RESTORE\n' | bash "$backup/restore.sh" --apply > "$fixture/restore.log"
             sha256sum --check "$fixture/data.sha" >/dev/null
-            [[ -f /etc/v2bxss/v2bxss && -f /usr/local/bin/v2bxss ]]
+            [[ -f /etc/v2bxss/v2bxss && -f /usr/local/bin/v2bxss && -f /usr/local/bin/v2bx ]]
             if [[ "$scenario" == stopped || "$scenario" == manager-only ]]; then
                 [[ $(<"$fixture/active") == false && $(<"$fixture/enabled") == false ]]
             else [[ $(<"$fixture/active") == true && $(<"$fixture/enabled") == true ]]; fi

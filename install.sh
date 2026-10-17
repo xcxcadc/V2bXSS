@@ -12,6 +12,14 @@ menu_base=/etc/v2bxss
 menu_config=/etc/v2bxss/config.json
 menu_branch=dev_new
 
+menu_item() {
+    local green='' plain=''
+    if [[ -t 1 && ! ${NO_COLOR+x} ]]; then green='\033[0;32m'; plain='\033[0m'; fi
+    printf ' %b%s.%b %s\n' "$green" "$1" "$plain" "$2"
+}
+
+menu_heading() { printf '\n---------- %s ----------\n' "$1"; }
+
 manager_require_target() {
     need_linux_root
     for target in /etc /usr /usr/local /usr/local/bin "$menu_base" "$menu_base/v2bxss" "$menu_base/manager" "$menu_base/toolchains" "$menu_config"; do
@@ -79,6 +87,21 @@ LAUNCHER
         mv -Tf "$staged" /usr/local/bin/v2bxss
     fi
     [[ -f "$menu_base/v2bxss" ]] || die '管理脚本安装校验失败'
+    local helper="$(dirname -- "$source")/tools/packaging/configure-node.py"
+    if [[ -f "$helper" && ! -L "$helper" ]]; then
+        install -d -m 0700 "$menu_base/manager"
+        install -m 0600 "$helper" "$menu_base/manager/configure-node.py"
+    fi
+    # Shadow the original command through PATH, preserving /usr/bin/v2bx and
+    # /usr/bin/V2bX. Never overwrite an unrelated /usr/local/bin command.
+    if [[ ! -e /usr/local/bin/v2bx && ! -L /usr/local/bin/v2bx ]] ||
+       { [[ -f /usr/local/bin/v2bx && ! -L /usr/local/bin/v2bx ]] && grep -Fxq '# V2bXSS menu launcher' /usr/local/bin/v2bx; }; then
+        staged=$(mktemp /usr/local/bin/.v2bx.XXXXXXXX)
+        install -m 0755 /usr/local/bin/v2bxss "$staged"
+        mv -Tf "$staged" /usr/local/bin/v2bx
+    else
+        echo '保留现有 /usr/local/bin/v2bx；请使用 v2bxss 打开本二开菜单。'
+    fi
 }
 
 menu_stable_service() {
@@ -178,16 +201,23 @@ menu_save_manager() {
 
 menu_new_config() {
     local choice config_path
-    printf '\n1. 按提示填写面板 / 节点信息（可添加多个节点）\n2. 导入已有 JSON 配置文件\n'
-    read -r -p '请选择 [1]：' choice || return 1
-    if [[ "${choice:-1}" == 1 ]]; then
-        python3 "$menu_source/tools/packaging/configure-node.py" wizard --output "$menu_work/config.json"
-    elif [[ "$choice" == 2 ]]; then
-        read -r -p '配置文件的绝对路径：' config_path || return 1
-        python3 "$menu_source/tools/packaging/configure-node.py" import --input "$config_path" --output "$menu_work/config.json"
-    else
-        die '无效选择'
-    fi
+    while true; do
+        menu_heading '安装 · 配置方式'
+        menu_item 1 '按提示填写面板 / 节点信息（可添加多个节点）'
+        menu_item 2 '导入已有 JSON 配置文件'
+        menu_item 0 '取消并返回主菜单'
+        read -r -p '请选择 [1]：' choice || return 1
+        case "${choice:-1}" in
+            1) python3 "$menu_source/tools/packaging/configure-node.py" wizard --output "$menu_work/config.json"; return ;;
+            2)
+                read -r -p '配置文件的绝对路径（0 返回）：' config_path || return 1
+                [[ "$config_path" != 0 ]] || continue
+                python3 "$menu_source/tools/packaging/configure-node.py" import --input "$config_path" --output "$menu_work/config.json"
+                return ;;
+            0) echo '已取消安装'; return 1 ;;
+            *) echo '请输入 0-2。' ;;
+        esac
+    done
 }
 
 menu_check_install_mode() {
@@ -212,7 +242,8 @@ menu_install_latest() {
         echo '已存在配置：将完整保留，包括证书、混淆和多节点设置。'
     else
         menu_new_config
-        args+=(--config "$menu_work/config.json")
+        menu_config_draft "$menu_work/config.json"
+        args+=(--config "$menu_draft/config.json")
     fi
     if [[ -f "$menu_base/current/BUILD-INFO" ]]; then
         installed_commit=$(awk -F= '$1 == "source_commit" {print $2; exit}' "$menu_base/current/BUILD-INFO")
@@ -232,6 +263,7 @@ menu_install_latest() {
         --arch "$menu_arch" --version "audit-${menu_commit:0:12}-$(date -u +%Y%m%d%H%M%S)" \
         --download-deps --apply "${args[@]}"
     menu_save_manager
+    if [[ "$mode" == install && -n ${menu_draft:-} ]]; then echo applied > "$menu_draft/state"; fi
     if [[ "$mode" == install ]]; then systemctl enable "$service"; fi
     echo '操作完成。更新保留原运行/开机自启状态；以后输入 v2bxss 打开菜单。'
     echo '后台托管审计规则自动同步，无需每次修改规则后重启节点。'
@@ -273,31 +305,156 @@ menu_migrate() {
     menu_save_manager
 }
 
-menu_configure() {
-    [[ -f "$menu_config" ]] || die '请先选择 1 完成安装'
-    menu_fetch_source
-    if [[ "$1" == 11 ]]; then
-        python3 "$menu_source/tools/packaging/configure-node.py" wizard --existing "$menu_config" --output "$menu_work/config.json"
-    else
-        local import_path answer
-        read -r -p '导入配置的绝对路径：' import_path
-        python3 "$menu_source/tools/packaging/configure-node.py" import --input "$import_path" --output "$menu_work/config.json"
-        read -r -p '将替换当前配置（先备份），确认？[y/N]：' answer
-        [[ "$answer" == y || "$answer" == Y ]] || { echo '已取消'; return; }
+menu_config_tool() {
+    menu_tool="$menu_base/manager/configure-node.py"
+    [[ ! -L "$menu_tool" ]] || die '配置工具不能是符号链接'
+    if [[ ! -f "$menu_tool" ]] || ! grep -Fxq 'MENU_CONFIG_VERSION = 2' "$menu_tool"; then
+        menu_fetch_source
+        install -m 0600 "$menu_source/tools/packaging/configure-node.py" "$menu_tool"
     fi
-    local backup
-    backup="/var/backups/v2bxss/config-$(date -u +%Y%m%dT%H%M%SZ)-$$"
-    install -d -m 0700 "$backup"
-    cp -a "$menu_config" "$backup/config.json"
-    printf '配置备份：%s\n' "$backup/config.json"
-    install -m 0600 "$menu_work/config.json" "${menu_config}.next"
-    mv -Tf "${menu_config}.next" "$menu_config"
+}
+
+menu_config_draft() {
+    local source=$1 target
+    for target in "$menu_base/manager/drafts"; do
+        [[ ! -L "$target" ]] || die '草稿目录不能是符号链接'
+    done
+    install -d -m 0700 "$menu_base/manager/drafts"
+    menu_draft=$(mktemp -d "$menu_base/manager/drafts/config-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXXXX")
+    if [[ -f "$menu_config" ]]; then install -m 0600 "$menu_config" "$menu_draft/previous.json"; fi
+    install -m 0600 "$source" "$menu_draft/config.json"
+    if systemctl is-active --quiet "$service"; then echo true > "$menu_draft/was-active"; else echo false > "$menu_draft/was-active"; fi
+    echo staged > "$menu_draft/state"
+    printf '已保留本次配置：%s/config.json\n' "$menu_draft"
+    [[ ! -f "$menu_draft/previous.json" ]] || printf '修改前配置：%s/previous.json\n' "$menu_draft"
+}
+
+menu_edit_config() {
+    local file=$1 editor
+    # Do not evaluate shell text from EDITOR or expose a config in terminal logs.
+    for editor in "${VISUAL:-${EDITOR:-}}" nano vi; do
+        [[ -n "$editor" ]] || continue
+        if command -v "$editor" >/dev/null; then "$editor" "$file"; return; fi
+    done
+    echo "没有找到编辑器。请安装 nano/vi 或直接编辑：$file" >&2
+    return 1
+}
+
+menu_try_config() {
+    local draft=$1
+    # Syntax/field errors stay in the editable draft, never replace the live file.
+    if ! python3 "$menu_tool" validate --input "$draft/config.json"; then
+        echo failed > "$draft/state"
+        echo '配置检查失败，草稿完整保留；修正后可重试。'
+        return 1
+    fi
+    install -m 0600 "$draft/config.json" "${menu_config}.next" || return 1
+    mv -Tf "${menu_config}.next" "$menu_config" || return 1
+    echo failed > "$draft/state"
     if ! systemctl restart "$service" || ! menu_stable_service; then
-        install -m 0600 "$backup/config.json" "$menu_config"
-        systemctl restart "$service" || true
-        die '新配置启动失败，已恢复旧配置；请检查菜单日志'
+        echo '新配置启动失败；已保留当前新配置，没有自动覆盖回旧配置。'
+        echo '该服务可能不可用；可在下面修改重试，或主动恢复修改前配置。'
+        return 1
     fi
-    echo '配置已保存并重启该二开服务。请在后台检查节点回执和用户/流量上报。'
+    echo applied > "$draft/state"
+    echo '配置已应用，服务启动稳定。请在后台确认节点回执和用户/流量上报。'
+}
+
+menu_config_recovery() {
+    local draft=$1 choice answer target
+    for target in "$draft" "$draft/config.json" "$draft/previous.json" "$draft/state" "$draft/was-active"; do
+        [[ ! -L "$target" ]] || die '草稿或恢复文件不能是符号链接'
+    done
+    [[ -f "$draft/config.json" ]] || die '配置草稿不存在'
+    while true; do
+        menu_heading '配置修正 · 保留本次输入'
+        printf '草稿：%s/config.json\n' "$draft"
+        menu_item 1 '修改此配置（编辑器打开，密钥不输出到日志）'
+        menu_item 2 '应用此配置并重试启动'
+        menu_item 3 '查看最近运行错误日志'
+        menu_item 4 '恢复修改前配置和原运行状态（需确认）'
+        menu_item 0 '保留本次配置，返回主菜单'
+        read -r -p '请选择 [0-4]：' choice || return 0
+        case "$choice" in
+            1) menu_edit_config "$draft/config.json" || echo '编辑未完成；文件仍保留。' ;;
+            2) if menu_try_config "$draft"; then return 0; fi ;;
+            3) show_logs "$service" 80 false || echo '日志查询失败。' ;;
+            4)
+                [[ -f "$draft/previous.json" ]] || { echo '首次配置没有旧文件可恢复。'; continue; }
+                read -r -p '输入 y 恢复修改前配置；0 或回车取消：' answer || return 0
+                [[ "$answer" == y || "$answer" == Y ]] || { echo '已取消恢复'; continue; }
+                install -m 0600 "$draft/previous.json" "${menu_config}.next"
+                mv -Tf "${menu_config}.next" "$menu_config"
+                if [[ -f "$draft/was-active" && $(<"$draft/was-active") == true ]]; then
+                    if ! systemctl restart "$service" || ! menu_stable_service; then echo '旧配置也未启动成功，请检查日志。'; continue; fi
+                else
+                    systemctl stop "$service"
+                fi
+                echo restored > "$draft/state"
+                echo '已主动恢复修改前配置；本次新配置仍保留在草稿中。'
+                return 0 ;;
+            0) echo '已保留本次配置；主菜单 3 → 3 可以继续修正。'; return 0 ;;
+            *) echo '请输入 0-4。' ;;
+        esac
+    done
+}
+
+menu_resume_config() {
+    local draft choice count=0
+    local drafts=()
+    menu_heading '选择待修正配置'
+    for draft in "$menu_base"/manager/drafts/config-*; do
+        [[ -d "$draft" && ! -L "$draft" && -f "$draft/state" && ! -L "$draft/state" ]] || continue
+        [[ $(<"$draft/state") == failed || $(<"$draft/state") == staged ]] || continue
+        drafts+=("$draft"); count=$((count + 1))
+        menu_item "$count" "$(basename "$draft")（$(<"$draft/state")）"
+    done
+    ((count > 0)) || { echo '没有待修正草稿。'; return 0; }
+    menu_item 0 '返回配置菜单'
+    read -r -p '请选择草稿序号：' choice || return 0
+    [[ "$choice" != 0 ]] || return 0
+    [[ "$choice" =~ ^[1-9][0-9]{0,5}$ ]] && ((10#$choice <= count)) || { echo '无效选择'; return 1; }
+    menu_config_recovery "${drafts[$((10#$choice - 1))]}"
+}
+
+menu_configure() {
+    local choice import_path answer
+    menu_config_tool
+    if [[ "$1" == 3 ]]; then
+        while true; do
+            menu_heading '配置管理'
+            menu_item 1 '修改当前配置（保留原文件备份）'
+            menu_item 2 '导入 / 替换配置（保留原文件备份）'
+            menu_item 3 '继续修正失败 / 待应用配置'
+            menu_item 0 '返回主菜单'
+            read -r -p '请选择 [0-3]：' choice || return 0
+            case "$choice" in
+                0) return 0 ;;
+                3) menu_resume_config; continue ;;
+                1|2) break ;;
+                *) echo '请输入 0-3。' ;;
+            esac
+        done
+    else
+        choice=11
+    fi
+    [[ -f "$menu_config" ]] || die '请先选择 1 完成安装；已有草稿可用配置菜单 3 继续修正'
+    case "$choice" in
+        11)
+            menu_config_draft "$menu_config"
+            python3 "$menu_tool" wizard --existing "$menu_config" --output "$menu_draft/append.json"
+            mv -Tf "$menu_draft/append.json" "$menu_draft/config.json" ;;
+        1)
+            menu_config_draft "$menu_config"
+            menu_edit_config "$menu_draft/config.json" ;;
+        2)
+            read -r -p '导入配置的绝对路径（0 返回）：' import_path || return 0
+            [[ "$import_path" != 0 ]] || return 0
+            read -r -p '将替换当前配置（先备份），确认？[y/N]：' answer || return 0
+            [[ "$answer" == y || "$answer" == Y ]] || { echo '已取消'; return 0; }
+            menu_config_draft "$import_path" ;;
+    esac
+    if ! menu_try_config "$menu_draft"; then menu_config_recovery "$menu_draft"; fi
 }
 
 menu_rollback() {
@@ -323,9 +480,11 @@ menu_rollback() {
 uninstall_fork() (
     local apply_uninstall=$1 answer unit=/etc/systemd/system/v2bxss.service
     local launcher=/usr/local/bin/v2bxss backup='' active=false enabled=false
-    local base_moved=false unit_moved=false launcher_moved=false changing=false
+    local base_moved=false unit_moved=false launcher_moved=false alias_moved=false changing=false
+    local alias_path=/usr/local/bin/v2bx alias_owned=false
     local fragment='' dropins='' effective='' target
     printf '卸载范围：仅 %s、/etc/v2bxss 和 /usr/local/bin/v2bxss。\n' "$service"
+    echo '同时移走属于本二开的 /usr/local/bin/v2bx 快捷入口；上游 /usr/bin 入口保留。'
     echo '将中断该二开节点连接；原版 V2bX、面板、其他服务、防火墙和外部证书不变。'
     echo '配置、证书、程序、构建缓存会移入 /var/backups/v2bxss/uninstall-*，不永久删除。'
     echo '卸载前请确认节点流量已成功上报；不能保证进程内待报增量零损失。'
@@ -334,6 +493,7 @@ uninstall_fork() (
         return 0
     fi
     manager_require_target
+    if [[ -f "$alias_path" && ! -L "$alias_path" ]] && grep -Fxq '# V2bXSS menu launcher' "$alias_path"; then alias_owned=true; fi
     for target in systemctl install mktemp mv cp cmp stat realpath flock grep; do need_command "$target"; done
     [[ -d /run/systemd/system ]] || die '需要使用 systemd 的 Linux 服务器'
     [[ -d "$menu_base" && -f "$menu_base/v2bxss" ]] || die '没有找到此二开的独立安装；不处理原版或旧目录'
@@ -376,15 +536,19 @@ backup=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 base=/etc/v2bxss
 unit=/etc/systemd/system/v2bxss.service
 launcher=/usr/local/bin/v2bxss
+alias_path=/usr/local/bin/v2bx
 service=v2bxss.service
 fail() { printf '恢复失败：%s\n' "$*" >&2; exit 1; }
 [[ $# == 1 && $1 == --apply ]] || { echo '恢复将移动备份回标准目录并还原服务状态；加 --apply 后仍需输入 RESTORE 确认。'; exit 0; }
 [[ $(id -u) == 0 && $(uname -s) == Linux ]] || fail '需要 Linux root'
 [[ $(dirname -- "$backup") == /var/backups/v2bxss && $(basename -- "$backup") == uninstall-* ]] || fail '非标准卸载备份'
 for target in /etc /etc/systemd /etc/systemd/system /usr /usr/local /usr/local/bin /var /var/backups /var/backups/v2bxss "$backup" \
-              "$backup/installation" "$backup/was-active" "$backup/was-enabled" "$backup/complete" "$backup/unit" "$backup/launcher"; do
+              "$backup/installation" "$backup/was-active" "$backup/was-enabled" "$backup/complete" "$backup/unit" "$backup/launcher" "$backup/alias"; do
     [[ ! -L "$target" ]] || fail "拒绝符号链接路径：$target"
 done
+if [[ -f "$backup/alias" ]]; then
+    [[ ! -e "$alias_path" && ! -L "$alias_path" ]] || fail 'v2bx 入口已被其他程序使用，拒绝覆盖'
+fi
 [[ -d "$backup/installation" && -f "$backup/complete" ]] || fail '备份不完整或已经恢复'
 [[ $(<"$backup/was-active") =~ ^(true|false)$ && $(<"$backup/was-enabled") =~ ^(true|false)$ ]] || fail '原服务状态无效'
 for target in "$base" "$unit" "$unit.d" "$launcher"; do
@@ -396,7 +560,7 @@ read -r -p '输入 RESTORE 确认恢复此二开及原运行状态：' answer ||
 [[ "$answer" == RESTORE ]] || { echo '已取消恢复'; exit 0; }
 exec 9>"$backup/restore.lock"
 flock -n 9 || fail '另一个恢复正在进行'
-moved=false; unit_written=false; launcher_written=false; success=false
+moved=false; unit_written=false; launcher_written=false; alias_written=false; success=false
 recover() {
     result=$?
     trap - EXIT
@@ -405,6 +569,7 @@ recover() {
         systemctl stop "$service" 2>/dev/null || true
         systemctl disable "$service" 2>/dev/null || true
         if $launcher_written; then mv -T -- "$launcher" "$backup/restore-failed-launcher-$$" || true; fi
+        if $alias_written; then mv -T -- "$alias_path" "$backup/restore-failed-alias-$$" || true; fi
         if $unit_written; then mv -T -- "$unit" "$backup/restore-failed-unit-$$" || true; fi
         if $moved; then mv -T -- "$base" "$backup/installation" || true; fi
         systemctl daemon-reload || true
@@ -417,6 +582,7 @@ trap 'exit 143' TERM
 mv -T -- "$backup/installation" "$base"; moved=true
 if [[ -f "$backup/unit" ]]; then install -m 0644 "$backup/unit" "$unit"; unit_written=true; fi
 if [[ -f "$backup/launcher" ]]; then install -m 0755 "$backup/launcher" "$launcher"; launcher_written=true; fi
+if [[ -f "$backup/alias" ]]; then install -m 0755 "$backup/alias" "$alias_path"; alias_written=true; fi
 systemctl daemon-reload
 if [[ $(<"$backup/was-enabled") == true ]]; then systemctl enable "$service"; fi
 if [[ $(<"$backup/was-active") == true ]]; then
@@ -436,6 +602,7 @@ RESTORE
             if $base_moved; then mv -T -- "$backup/installation" "$menu_base" || true; fi
             if $unit_moved; then mv -T -- "$backup/unit" "$unit" || true; fi
             if $launcher_moved; then mv -T -- "$backup/launcher" "$launcher" || true; fi
+            if $alias_moved; then mv -T -- "$backup/alias" "$alias_path" || true; fi
             systemctl daemon-reload || true
             if $enabled; then systemctl enable "$service" || true; fi
             if $active; then systemctl start "$service" || true; fi
@@ -454,6 +621,7 @@ RESTORE
         mv -T -- "$unit" "$backup/unit"; unit_moved=true
     fi
     if [[ -f "$launcher" ]]; then mv -T -- "$launcher" "$backup/launcher"; launcher_moved=true; fi
+    if $alias_owned; then mv -T -- "$alias_path" "$backup/alias"; alias_moved=true; fi
     mv -T -- "$menu_base" "$backup/installation"; base_moved=true
     systemctl daemon-reload
     systemctl reset-failed "$service" 2>/dev/null || true
@@ -512,17 +680,36 @@ menu_action() {
 }
 
 interactive_menu() {
-    local choice
+    local choice pause state autostart
     # Ctrl+C during the live viewer ends journalctl and returns to this menu.
     # The viewer runs in its own shell and installs its own INT handler.
     trap ':' INT
     while true; do
         printf '\n========== V2bXSS 二开管理菜单 ==========\n'
         printf '仓库：xcxcadc/V2bXSS · dev_new\n'
-        printf ' 1. 安装最新二开版本\n 2. 更新到最新二开版本（保留配置）\n 3. 导入 / 替换配置（自动备份）\n'
-        printf ' 4. 启动服务\n 5. 停止服务\n 6. 重启服务\n 7. 查看运行状态\n 8. 查看实时运行 / 连接日志（Ctrl+C 返回）\n'
-        printf ' 9. 开启 / 关闭开机自启\n10. 回滚上一版本（二次确认，0 取消）\n11. 添加对接节点（保留已有节点）\n12. 迁移原版 / 旧版独立安装到 /etc/v2bxss\n13. 卸载 V2bXSS（确认后执行，保留完整备份）\n 0. 退出\n'
+        printf '%s\n' '----------------------------------------'
+        menu_item 1 '安装最新二开版本'
+        menu_item 2 '更新到最新二开版本（保留配置）'
+        menu_item 3 '配置管理 / 导入 / 修正失败配置'
+        printf '%s\n' '----------------------------------------'
+        menu_item 4 '启动服务'
+        menu_item 5 '停止服务'
+        menu_item 6 '重启服务'
+        menu_item 7 '查看运行状态'
+        menu_item 8 '查看实时运行 / 连接日志（Ctrl+C 返回）'
+        menu_item 9 '开启 / 关闭开机自启'
+        printf '%s\n' '----------------------------------------'
+        menu_item 10 '回滚上一版本（二次确认，0 取消）'
+        menu_item 11 '添加对接节点（保留已有节点）'
+        menu_item 12 '迁移原版 / 旧版独立安装到 /etc/v2bxss'
+        menu_item 13 '卸载 V2bXSS（确认后执行，保留完整备份）'
+        menu_item 0 '退出'
         printf '管理服务：%s\n' "$service"
+        if [[ -t 0 && -t 1 ]] && command -v systemctl >/dev/null; then
+            state=$(systemctl is-active "$service" 2>/dev/null || true)
+            autostart=$(systemctl is-enabled "$service" 2>/dev/null || true)
+            printf '运行状态：%s ｜ 开机自启：%s\n' "${state:-未安装}" "${autostart:-未设置}"
+        fi
         read -r -p '请选择 [0-13]：' choice || return 0
         case "$choice" in
             0) return 0 ;;
@@ -531,6 +718,7 @@ interactive_menu() {
                 # when the menu catches its exit code to stay open on failure.
                 bash "${BASH_SOURCE[0]}" __menu_action "$choice" || echo '操作未完成；请查看上方错误。菜单仍可继续使用。'
                 if [[ "$choice" == 13 && ! -e /etc/v2bxss/v2bxss && ! -e /usr/local/bin/v2bxss ]]; then return 0; fi
+                if [[ -t 0 ]]; then read -r -p '按回车返回主菜单：' pause || return 0; fi
                 ;;
             *) echo '请输入 0-13。' ;;
         esac
@@ -542,11 +730,11 @@ usage() {
 Build this V2bXSS fork and manage the independent v2bxss.service.
 
 Interactive (recommended): bash install.sh
-Reopen after installation: v2bxss
+Reopen after installation: v2bx (or v2bxss)
 Repair only the menu/shortcut, with no build, network or service restart:
   bash install.sh repair
 All new fork files use /etc/v2bxss; the node executable is current/v2bxss.
-Menu: 1 install, 2 update, 3 import, 8 live logs, 10 rollback (two confirmations),
+Menu: 1 install, 2 update, 3 config/edit/import/recover, 8 live logs, 10 rollback (two confirmations),
 11 append node, 12 migrate upstream/old independent layout, 13 uninstall.
 The menu prepares dependencies, resolves this fork's latest commit, prompts for
 node configuration and installs/starts it. Existing configuration is preserved.
@@ -610,7 +798,7 @@ fi
 if [[ "${1:-}" == repair ]]; then
     [[ $# == 1 ]] || die 'repair 不接受其他参数'
     manager_install "${BASH_SOURCE[0]}"
-    echo '管理入口已修复：v2bxss；脚本：/etc/v2bxss/v2bxss。未重启或修改节点配置。'
+    echo '管理入口已修复：v2bx / v2bxss；脚本：/etc/v2bxss/v2bxss。未重启或修改节点配置。'
     exit 0
 fi
 if [[ "${1:-}" == __menu_action ]]; then
