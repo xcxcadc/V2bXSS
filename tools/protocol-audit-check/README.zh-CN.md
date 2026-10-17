@@ -38,3 +38,18 @@ bash tools/protocol-audit-check/run-sequential.sh sing/hysteria2 sing/tuic
 sing tracker 关闭连接后仍可能触发域名解析或出站拨号；本用例不证明阻断发生在 DNS 前，
 也不把回环 HTTP 夹具的通过当作实际面板数据库已收到证据。
 运行结果须单独记录，添加测试代码本身不代表这些组合已经通过。
+
+另有 Controller 生命周期回归，使用实际控制器轮询与自动上报，补充直接向内核添加用户
+的测试所未覆盖的启动路径。在同样的隔离环境和缓存设置下运行：
+
+```sh
+go test -p 1 -parallel 1 -buildvcs=false \
+  -tags 'sing xray hysteria2 with_quic with_grpc with_utls with_wireguard with_acme with_gvisor' \
+  ./tools/protocol-audit-check \
+  -run 'TestControllerEmptyUserLifecycle|TestEmptyHY2DoesNotPreventTUICStartup' \
+  -v -count=1 -timeout=3m
+```
+
+覆盖原生 HY2、sing TUIC 和 Xray VMess 的零用户启动、拒绝未授权连接、自动授权、
+撤销最后一个用户、恢复授权、TCP/UDP 收发、自动流量/在线 HTTP 上报；另检查同一
+Selector 中空用户 HY2 排在前面时，有授权用户的 TUIC 仍能启动及收发。
