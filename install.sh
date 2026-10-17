@@ -190,10 +190,22 @@ menu_new_config() {
     fi
 }
 
-menu_install_latest() {
-    if [[ ! -f "$menu_config" && -f /etc/v2bx-audit-test/config.json ]]; then
-        die '检测到旧版安装，请先选择菜单 12 迁移，避免重复节点或覆盖原配置'
+menu_check_install_mode() {
+    if [[ "$1" == install ]]; then
+        [[ ! -e "$menu_base/current" && ! -L "$menu_base/current" && ! -e /etc/systemd/system/v2bxss.service ]] ||
+            die '已经安装二开；更新请选择菜单 2，不重复安装'
+        [[ ! -f /etc/v2bx-audit-test/config.json && ! -f /etc/V2bX/config.json ]] ||
+            die '检测到旧版/原版节点，请选择菜单 12 迁移，避免重复节点'
+    else
+        [[ -f "$menu_config" && -x "$menu_base/current/v2bxss" ]] ||
+            die '没有找到独立二开安装；新装请选择 1，原版迁移请选择 12'
     fi
+}
+
+menu_install_latest() {
+    local mode=$1 was_active=false
+    menu_check_install_mode "$mode"
+    if systemctl is-active --quiet "$service"; then was_active=true; fi
     menu_fetch_source
     local args=() installed_commit=''
     if [[ -f "$menu_config" ]]; then
@@ -215,29 +227,56 @@ menu_install_latest() {
     export GOPROXY='https://proxy.golang.org,direct' GOSUMDB=sum.golang.org
     export GOMAXPROCS="${GOMAXPROCS:-2}" GOMEMLIMIT="${GOMEMLIMIT:-384MiB}" GOFLAGS='-p=2'
     echo '正在下载校验依赖并编译二开；首次安装可能需要数分钟，请等待……'
+    if [[ "$mode" == install || "$was_active" == true ]]; then args+=(--start); fi
     bash "$menu_source/install.sh" install --source "$menu_source" --commit "$menu_commit" \
         --arch "$menu_arch" --version "audit-${menu_commit:0:12}-$(date -u +%Y%m%d%H%M%S)" \
-        --download-deps --apply --start "${args[@]}"
+        --download-deps --apply "${args[@]}"
     menu_save_manager
-    systemctl enable "$service"
-    echo '安装完成。已开启开机自启；以后输入 v2bxss 打开菜单。'
+    if [[ "$mode" == install ]]; then systemctl enable "$service"; fi
+    echo '操作完成。更新保留原运行/开机自启状态；以后输入 v2bxss 打开菜单。'
     echo '后台托管审计规则自动同步，无需每次修改规则后重启节点。'
 }
 
 menu_migrate() {
-    local answer
-    echo '将旧版独立安装迁移到 /etc/v2bxss，保留旧配置和回滚资料。需要切换服务一次。'
-    read -r -p '确认迁移？[y/N]：' answer || return 1
-    [[ "$answer" == y || "$answer" == Y ]] || { echo '已取消'; return; }
+    local answer kind
+    if [[ -f /etc/V2bX/config.json && -f /etc/v2bx-audit-test/config.json ]]; then
+        die '同时发现两套旧安装，请先审查端口与服务，不自动选择'
+    elif [[ -f /etc/V2bX/config.json ]]; then
+        kind=upstream
+    elif [[ -f /etc/v2bx-audit-test/config.json ]]; then
+        kind=independent
+    else
+        die '没有找到原版 /etc/V2bX 或旧版独立安装'
+    fi
+    echo '将完整迁移到 /etc/v2bxss，保留原文件和回滚资料。服务切换会短暂中断连接。'
+    echo '原版迁移构建最新二开，保留全部节点、证书、混淆、路由及原运行/自启状态。'
+    read -r -p '输入 MIGRATE 确认，输入 0 或直接回车取消返回：' answer || { echo '已取消'; return 0; }
+    [[ "$answer" == MIGRATE ]] || { echo '已取消'; return 0; }
     menu_fetch_source
-    bash "$menu_source/tools/packaging/migrate-layout.sh" --apply
+    if [[ "$kind" == upstream ]]; then
+        bash "$menu_source/tools/packaging/migrate-upstream.sh"
+        menu_prepare_go
+        export GOMODCACHE="$menu_base/build-cache/modules" GOCACHE="$menu_base/build-cache/go"
+        export GOMAXPROCS="${GOMAXPROCS:-2}" GOMEMLIMIT="${GOMEMLIMIT:-384MiB}" GOFLAGS='-p=2'
+        (cd "$menu_source"; GOTOOLCHAIN=local GOEXPERIMENT=jsonv2 GOSUMDB=sum.golang.org \
+            GONOSUMDB='' GOPRIVATE='' GOPROXY=https://proxy.golang.org,direct go mod download
+            GOTOOLCHAIN=local GOEXPERIMENT=jsonv2 GOPROXY=off GOSUMDB=off go mod verify)
+        [[ -z "$(git -C "$menu_source" status --porcelain)" ]] || die '依赖改变源码，拒绝继续迁移'
+        local bundle="$menu_work/bundle" version="audit-${menu_commit:0:12}-$(date -u +%Y%m%d%H%M%S)"
+        bash "$menu_source/tools/packaging/build-local-bundle.sh" --source "$menu_source" --output "$bundle" --version "$version" --arch "$menu_arch"
+        bash "$menu_source/tools/packaging/migrate-upstream.sh" --bundle "$bundle" --version "$version" \
+            --binary-sha256 "$(sha256sum "$bundle/v2bxss" | cut -d ' ' -f 1)" \
+            --manifest-sha256 "$(sha256sum "$bundle/SHA256SUMS" | cut -d ' ' -f 1)" --apply
+    else
+        bash "$menu_source/tools/packaging/migrate-layout.sh" --apply
+    fi
     menu_save_manager
 }
 
 menu_configure() {
     [[ -f "$menu_config" ]] || die '请先选择 1 完成安装'
     menu_fetch_source
-    if [[ "$1" == 2 ]]; then
+    if [[ "$1" == 11 ]]; then
         python3 "$menu_source/tools/packaging/configure-node.py" wizard --existing "$menu_config" --output "$menu_work/config.json"
     else
         local import_path answer
@@ -272,10 +311,156 @@ menu_rollback() {
     done
     [[ -n "$selected" ]] || die '没有适用于当前版本的上一版备份'
     printf '将使用备份：%s\n' "$selected"
-    read -r -p '回滚二进制及该备份中的配置并重启？[y/N]：' answer
-    [[ "$answer" == y || "$answer" == Y ]] || { echo '已取消'; return; }
+    echo '回滚将恢复上一版程序及该备份中的配置，并重启服务。'
+    read -r -p '第一次确认 [y/N]（0 取消返回）：' answer || { echo '已取消'; return 0; }
+    [[ "$answer" == y || "$answer" == Y ]] || { echo '已取消'; return 0; }
+    read -r -p '第二次确认：输入 ROLLBACK 执行；0 或回车取消返回：' answer || { echo '已取消'; return 0; }
+    [[ "$answer" == ROLLBACK ]] || { echo '已取消'; return 0; }
     bash "$selected/rollback-test-node.sh" --backup "$selected" --apply --start
 }
+
+# Recoverable removal of this independent layout only. No download or compiler.
+uninstall_fork() (
+    local apply_uninstall=$1 answer unit=/etc/systemd/system/v2bxss.service
+    local launcher=/usr/local/bin/v2bxss backup='' active=false enabled=false
+    local base_moved=false unit_moved=false launcher_moved=false changing=false
+    local fragment='' dropins='' effective='' target
+    printf '卸载范围：仅 %s、/etc/v2bxss 和 /usr/local/bin/v2bxss。\n' "$service"
+    echo '将中断该二开节点连接；原版 V2bX、面板、其他服务、防火墙和外部证书不变。'
+    echo '配置、证书、程序、构建缓存会移入 /var/backups/v2bxss/uninstall-*，不永久删除。'
+    echo '卸载前请确认节点流量已成功上报；不能保证进程内待报增量零损失。'
+    if [[ "$apply_uninstall" != true ]]; then
+        echo 'DRY RUN：未修改文件或服务。执行卸载：v2bxss uninstall --apply（仍需确认）。'
+        return 0
+    fi
+    manager_require_target
+    for target in systemctl install mktemp mv cp cmp stat realpath flock grep; do need_command "$target"; done
+    [[ -d /run/systemd/system ]] || die '需要使用 systemd 的 Linux 服务器'
+    [[ -d "$menu_base" && -f "$menu_base/v2bxss" ]] || die '没有找到此二开的独立安装；不处理原版或旧目录'
+    for target in /etc/systemd /etc/systemd/system "$unit" "$unit.d" /var /var/backups /var/backups/v2bxss \
+                  "$menu_base/layout.lock" "$menu_base/manager/operation.lock"; do
+        [[ ! -L "$target" ]] || die "卸载路径不能是符号链接：$target"
+    done
+    [[ ! -e "$unit.d" ]] || die '检测到自定义服务 drop-in；请先人工审查，不自动卸载'
+    fragment=$(systemctl show "$service" --property=FragmentPath --value 2>/dev/null || true)
+    if [[ -f "$unit" ]]; then
+        [[ "$fragment" == "$unit" ]] || die '有效服务路径不是本二开的标准 unit'
+        dropins=$(systemctl show "$service" --property=DropInPaths --value)
+        [[ -z "$dropins" ]] || die '检测到自定义服务 drop-in；请先人工审查'
+        effective=$(systemctl show "$service" --property=ExecStart --value)
+        [[ "$effective" == *"path=$menu_base/current/v2bxss "* ]] || die '有效服务指向其他程序，拒绝卸载'
+        if systemctl is-active --quiet "$service"; then active=true; fi
+        if systemctl is-enabled --quiet "$service"; then enabled=true; fi
+    else
+        [[ -z "$fragment" ]] || die '检测到其他位置的同名服务，拒绝卸载'
+    fi
+    read -r -p '输入 UNINSTALL 确认卸载（其他输入取消）：' answer || { echo '已取消卸载'; return 0; }
+    [[ "$answer" == UNINSTALL ]] || { echo '已取消卸载'; return 0; }
+    install -d -m 0700 "$menu_base/manager" /var/backups/v2bxss
+    exec 9>"$menu_base/manager/operation.lock"
+    flock -n 9 || die '另一个安装/配置操作正在进行，未卸载'
+    exec 8>"$menu_base/layout.lock"
+    flock -n 8 || die '另一个迁移/回滚操作正在进行，未卸载'
+    # Atomic rename: never partially copy/remove a large installation.
+    [[ $(stat -c %d "$menu_base") == $(stat -c %d /var/backups/v2bxss) ]] ||
+        die '安装和备份目录不在同一文件系统，无法原子保留全部文件；未停止服务'
+    backup=$(mktemp -d "/var/backups/v2bxss/uninstall-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXXXX")
+    install -m 0700 "${BASH_SOURCE[0]}" "$backup/manager.sh"
+    printf '%s\n' "$active" > "$backup/was-active"
+    printf '%s\n' "$enabled" > "$backup/was-enabled"
+    cat > "$backup/restore.sh" <<'RESTORE'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+backup=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+base=/etc/v2bxss
+unit=/etc/systemd/system/v2bxss.service
+launcher=/usr/local/bin/v2bxss
+service=v2bxss.service
+fail() { printf '恢复失败：%s\n' "$*" >&2; exit 1; }
+[[ $# == 1 && $1 == --apply ]] || { echo '恢复将移动备份回标准目录并还原服务状态；加 --apply 后仍需输入 RESTORE 确认。'; exit 0; }
+[[ $(id -u) == 0 && $(uname -s) == Linux ]] || fail '需要 Linux root'
+[[ $(dirname -- "$backup") == /var/backups/v2bxss && $(basename -- "$backup") == uninstall-* ]] || fail '非标准卸载备份'
+for target in /etc /etc/systemd /etc/systemd/system /usr /usr/local /usr/local/bin /var /var/backups /var/backups/v2bxss "$backup" \
+              "$backup/installation" "$backup/was-active" "$backup/was-enabled" "$backup/complete" "$backup/unit" "$backup/launcher"; do
+    [[ ! -L "$target" ]] || fail "拒绝符号链接路径：$target"
+done
+[[ -d "$backup/installation" && -f "$backup/complete" ]] || fail '备份不完整或已经恢复'
+[[ $(<"$backup/was-active") =~ ^(true|false)$ && $(<"$backup/was-enabled") =~ ^(true|false)$ ]] || fail '原服务状态无效'
+for target in "$base" "$unit" "$unit.d" "$launcher"; do
+    [[ ! -e "$target" && ! -L "$target" ]] || fail "目标已存在，拒绝覆盖：$target"
+done
+[[ -z $(systemctl show "$service" --property=FragmentPath --value 2>/dev/null || true) ]] || fail '已经存在同名服务'
+[[ $(stat -c %d "$backup/installation") == $(stat -c %d /etc) ]] || fail '无法原子恢复到另一文件系统'
+read -r -p '输入 RESTORE 确认恢复此二开及原运行状态：' answer || exit 0
+[[ "$answer" == RESTORE ]] || { echo '已取消恢复'; exit 0; }
+exec 9>"$backup/restore.lock"
+flock -n 9 || fail '另一个恢复正在进行'
+moved=false; unit_written=false; launcher_written=false; success=false
+recover() {
+    result=$?
+    trap - EXIT
+    if [[ "$success" != true ]]; then
+        echo '恢复未完成，正在退回卸载状态；所有文件仍保留。' >&2
+        systemctl stop "$service" 2>/dev/null || true
+        systemctl disable "$service" 2>/dev/null || true
+        if $launcher_written; then mv -T -- "$launcher" "$backup/restore-failed-launcher-$$" || true; fi
+        if $unit_written; then mv -T -- "$unit" "$backup/restore-failed-unit-$$" || true; fi
+        if $moved; then mv -T -- "$base" "$backup/installation" || true; fi
+        systemctl daemon-reload || true
+    fi
+    exit "$result"
+}
+trap recover EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+mv -T -- "$backup/installation" "$base"; moved=true
+if [[ -f "$backup/unit" ]]; then install -m 0644 "$backup/unit" "$unit"; unit_written=true; fi
+if [[ -f "$backup/launcher" ]]; then install -m 0755 "$backup/launcher" "$launcher"; launcher_written=true; fi
+systemctl daemon-reload
+if [[ $(<"$backup/was-enabled") == true ]]; then systemctl enable "$service"; fi
+if [[ $(<"$backup/was-active") == true ]]; then
+    systemctl start "$service"
+    systemctl is-active --quiet "$service" || fail '服务未启动'
+fi
+success=true
+echo '已恢复原目录和服务状态；备份资料仍保留。'
+RESTORE
+    chmod 0700 "$backup/restore.sh"
+    printf '卸载备份：%s\n恢复命令：bash %q --apply\n' "$backup" "$backup/restore.sh"
+    recover_uninstall() {
+        local result=$?
+        trap - EXIT
+        if $changing; then
+            echo '卸载未完成，正在恢复原文件及服务状态。' >&2
+            if $base_moved; then mv -T -- "$backup/installation" "$menu_base" || true; fi
+            if $unit_moved; then mv -T -- "$backup/unit" "$unit" || true; fi
+            if $launcher_moved; then mv -T -- "$backup/launcher" "$launcher" || true; fi
+            systemctl daemon-reload || true
+            if $enabled; then systemctl enable "$service" || true; fi
+            if $active; then systemctl start "$service" || true; fi
+            echo "若自动恢复失败，请检查保留的卸载备份：$backup" >&2
+        fi
+        exit "$result"
+    }
+    trap recover_uninstall EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    changing=true
+    if [[ -f "$unit" ]]; then
+        systemctl stop "$service"
+        if systemctl is-active --quiet "$service"; then die '服务仍在运行，取消卸载'; fi
+        systemctl disable "$service"
+        mv -T -- "$unit" "$backup/unit"; unit_moved=true
+    fi
+    if [[ -f "$launcher" ]]; then mv -T -- "$launcher" "$backup/launcher"; launcher_moved=true; fi
+    mv -T -- "$menu_base" "$backup/installation"; base_moved=true
+    systemctl daemon-reload
+    systemctl reset-failed "$service" 2>/dev/null || true
+    printf 'complete\n' > "$backup/complete"
+    changing=false
+    echo 'V2bXSS 已卸载；完整文件已保留在上述备份目录，未卸载原版或其他程序。'
+)
 
 # Read only: never change the log level, configuration or service state.
 # Keep the signal handler in a subshell so it cannot leak into other actions.
@@ -297,16 +482,19 @@ show_logs() (
 menu_action() {
     case "$1" in
         7) need_command systemctl; systemctl status --no-pager --full "$service"; return ;;
-        8) show_logs "$service" 100 false; return ;;
-        11) show_logs "$service" 100 true; return ;;
+        8) show_logs "$service" 100 true; return ;;
+        13) uninstall_fork true; return ;;
     esac
     menu_require_host
     case "$1" in
-        1|2|3|12) menu_dependencies ;;
+        1) menu_check_install_mode install; menu_dependencies ;;
+        2) menu_check_install_mode update; menu_dependencies ;;
+        3|11|12) menu_dependencies ;;
     esac
     case "$1" in
-        1) menu_install_latest ;;
-        2|3) menu_configure "$1" ;;
+        1) menu_install_latest install ;;
+        2) menu_install_latest update ;;
+        3|11) menu_configure "$1" ;;
         4) systemctl start "$service"; menu_stable_service ;;
         5) systemctl stop "$service" ;;
         6) systemctl restart "$service"; menu_stable_service ;;
@@ -331,19 +519,20 @@ interactive_menu() {
     while true; do
         printf '\n========== V2bXSS 二开管理菜单 ==========\n'
         printf '仓库：xcxcadc/V2bXSS · dev_new\n'
-        printf ' 1. 安装 / 更新到最新二开版本\n 2. 添加对接节点（保留已有节点）\n 3. 导入 / 替换配置（自动备份）\n'
-        printf ' 4. 启动服务\n 5. 停止服务\n 6. 重启服务\n 7. 查看运行状态\n 8. 查看最近日志\n'
-        printf ' 9. 开启 / 关闭开机自启\n10. 回滚上一版本\n11. 查看实时运行 / 连接日志（Ctrl+C 返回）\n12. 迁移旧版独立安装到 /etc/v2bxss\n 0. 退出\n'
+        printf ' 1. 安装最新二开版本\n 2. 更新到最新二开版本（保留配置）\n 3. 导入 / 替换配置（自动备份）\n'
+        printf ' 4. 启动服务\n 5. 停止服务\n 6. 重启服务\n 7. 查看运行状态\n 8. 查看实时运行 / 连接日志（Ctrl+C 返回）\n'
+        printf ' 9. 开启 / 关闭开机自启\n10. 回滚上一版本（二次确认，0 取消）\n11. 添加对接节点（保留已有节点）\n12. 迁移原版 / 旧版独立安装到 /etc/v2bxss\n13. 卸载 V2bXSS（确认后执行，保留完整备份）\n 0. 退出\n'
         printf '管理服务：%s\n' "$service"
-        read -r -p '请选择 [0-12]：' choice || return 0
+        read -r -p '请选择 [0-13]：' choice || return 0
         case "$choice" in
             0) return 0 ;;
-            [1-9]|10|11|12)
+            [1-9]|10|11|12|13)
                 # A separate shell preserves errexit inside every action even
                 # when the menu catches its exit code to stay open on failure.
                 bash "${BASH_SOURCE[0]}" __menu_action "$choice" || echo '操作未完成；请查看上方错误。菜单仍可继续使用。'
+                if [[ "$choice" == 13 && ! -e /etc/v2bxss/v2bxss && ! -e /usr/local/bin/v2bxss ]]; then return 0; fi
                 ;;
-            *) echo '请输入 0-12。' ;;
+            *) echo '请输入 0-13。' ;;
         esac
     done
 }
@@ -357,7 +546,8 @@ Reopen after installation: v2bxss
 Repair only the menu/shortcut, with no build, network or service restart:
   bash install.sh repair
 All new fork files use /etc/v2bxss; the node executable is current/v2bxss.
-Menu option 12 migrates an old independent audit-test installation with backup.
+Menu: 1 install, 2 update, 3 import, 8 live logs, 10 rollback (two confirmations),
+11 append node, 12 migrate upstream/old independent layout, 13 uninstall.
 The menu prepares dependencies, resolves this fork's latest commit, prompts for
 node configuration and installs/starts it. Existing configuration is preserved.
 The options below are the optional advanced/non-interactive interface.
@@ -386,7 +576,13 @@ Management (only v2bxss.service):
   bash install.sh logs -f [--lines 100]
   bash install.sh logs -f --service V2bX.service
   bash install.sh start|restart|stop [--apply | --dry-run]
-Installed shortcut: v2bxss logs -f (menu option 11). Ctrl+C stops viewing only.
+  bash install.sh uninstall [--apply | --dry-run]
+Uninstall/menu option 13 requires typing UNINSTALL, then stops/disables only
+v2bxss.service and moves its files into /var/backups/v2bxss/uninstall-*.
+Configuration/certificates/binaries are retained, not permanently erased.
+The printed restore.sh command restores the old files and service state after
+typing RESTORE; it refuses to overwrite a later installation.
+Installed shortcut: v2bxss logs -f (menu option 8). Ctrl+C stops viewing only.
 Log flags: -f/--follow, -n/--lines 0..10000, --service
 v2bxss.service (default), V2bX-audit-test.service (old independent layout)
 or V2bX.service (original-service upgrade).
@@ -429,7 +625,7 @@ if (($#)) && [[ "$1" != -* ]]; then
     shift
 fi
 case "$action" in
-    install|status|logs|start|restart|stop) ;;
+    install|status|logs|start|restart|stop|uninstall) ;;
     help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
 esac
@@ -503,6 +699,7 @@ if [[ "$action" != install ]]; then
             systemctl "$action" "$service"
             if [[ "$action" != stop ]]; then systemctl is-active --quiet "$service"; fi
             ;;
+        uninstall) uninstall_fork "$apply" ;;
     esac
     exit 0
 fi

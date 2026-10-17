@@ -70,7 +70,14 @@ if [[ -L "$base_dir/current" ]]; then
     previous_release=$(realpath -e -- "$base_dir/current")
     [[ "$(dirname -- "$previous_release")" == "$base_dir/releases" && -f "$previous_release/v2bxss" && ! -L "$previous_release/v2bxss" ]] || { echo 'Previous release escapes the isolated installation or is invalid' >&2; exit 1; }
 fi
-if [[ -f "$service_file" ]] && ! cmp -s "$service_file" "$bundle/v2bxss.service"; then
+service_template="$bundle/v2bxss.service"
+# A validated upstream migration retains its original working directory and
+# resource limits. Updates must preserve that exact reviewed unit.
+if [[ -f "$base_dir/manager/migrated-service" && ! -L "$base_dir/manager/migrated-service" &&
+      -f "$service_file" ]] && cmp -s "$service_file" "$base_dir/manager/migrated-service"; then
+    service_template="$base_dir/manager/migrated-service"
+fi
+if [[ -f "$service_file" ]] && ! cmp -s "$service_file" "$service_template"; then
     echo 'Existing test unit differs; review it before installing' >&2; exit 1
 fi
 release_dir="$base_dir/releases/$version"
@@ -111,7 +118,7 @@ install -m 0755 "$bundle/v2bxss" "$release_dir/v2bxss"
 install -m 0600 "$bundle/BUILD-INFO" "$release_dir/BUILD-INFO"
 install -m 0600 "$bundle/SHA256SUMS" "$release_dir/SHA256SUMS"
 if [[ -n "$new_config" ]]; then install -m 0600 "$new_config" "$config_dir/config.json"; fi
-install -m 0644 "$bundle/v2bxss.service" "$service_file"
+install -m 0644 "$service_template" "$service_file"
 [[ ! -e "$base_dir/current.next-$$" && ! -L "$base_dir/current.next-$$" ]] || { echo 'Temporary link already exists' >&2; exit 1; }
 ln -s "$release_dir" "$base_dir/current.next-$$"
 mv -Tf "$base_dir/current.next-$$" "$base_dir/current"
