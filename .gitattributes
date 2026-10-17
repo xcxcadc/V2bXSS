@@ -1,0 +1,3 @@
+# Keep the remote integration runner executable by Linux shells after archives
+# or checkouts are prepared on Windows.
+tools/protocol-audit-check/run-sequential.sh text eol=lf

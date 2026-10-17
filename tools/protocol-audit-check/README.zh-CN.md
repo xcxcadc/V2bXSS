@@ -4,17 +4,37 @@
 sing-box 真实协议客户端和回环 TCP/UDP echo；面板接口为带节点鉴权的 HTTP 测试夹具。
 所有监听均为 `127.0.0.1` 随机端口，证书运行时生成并验证，不使用 `insecure`。
 
+使用 Go 1.25、`GOEXPERIMENT=jsonv2`。工具链、模块与编译缓存只在隔离远端准备；
+不在操作者的 Windows 工作站下载大型构建依赖或编译。空间有限时不要并行启动本套测试。
+
 ```sh
-GOEXPERIMENT=jsonv2 GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off \
-go test -p 1 -tags 'sing xray hysteria2 with_quic with_grpc with_utls with_wireguard with_acme with_gvisor' \
-  ./tools/protocol-audit-check -run TestProtocolAuditRoundTrip -v -count=1 -timeout=15m
+# 指向根分区或其他有足够空间的磁盘；不要指向容量很小的 /tmp tmpfs。
+export AUDIT_TEST_WORKDIR=/path/on-disk/v2bx-audit-tests
+
+# 一次只启动一个协议进程；下一项等待上一项退出，复用同一份编译和模块缓存。
+bash tools/protocol-audit-check/run-sequential.sh
+
+# 只重测一个或几个指定组合，仍逐个执行。
+bash tools/protocol-audit-check/run-sequential.sh sing/hysteria2 sing/tuic
 ```
+
+脚本默认关闭依赖下载，使用单个编译任务、单个测试并发，限制 Go 并发与内存目标。
+第一次准备依赖也应在隔离远端进行，可显式传入 `GOPROXY` 和 `GOSUMDB`。
+已有 `GOTMPDIR`、`GOCACHE`、`GOMODCACHE` 会复用，不必复制已有缓存。
+每项执行前检查构建盘剩余空间，少于 1 GiB 就停止；初次构建须额外预留依赖和缓存空间。
+结果保存在工作目录下独立的 `results/run.*` 文件夹，包含逐项日志和 `summary.tsv`；
+失败后继续其他项目，最终退出码仍为非零，不能只凭脚本跑到末尾判断通过。
 
 覆盖 Xray 的 VMess/VLESS/SS/Trojan、sing 的八类协议和原生 HY2，共 13 种组合。
 逐项检查基线、观察、阻断、删除策略后恢复的 TCP/UDP 真实收发，域名及子域阻断证据，
 用户 ID、版本与动作上报，流量和在线的原 HTTP 上报接口，以及移除资格后新客户端拒绝。
+流量断言要求双向计数均包含已经成功回显的全部应用字节，而非仅检查计数大于零；
+部分内核还会计入被阻断请求的入站字节，因此不同内核的总计不要求相等。
 队列和轮询使用公开配置的一秒测试间隔；实际节点默认间隔没有改变。
 
 本套用例不写数据库、不操作 systemd 或已部署节点；也不替代实际面板数据库入库、
 各桌面/手机客户端、全部传输变体、已有长连接撤销和压力测试。
+域名用例同时要求客户端失败和已认证的匹配证据，避免把单纯 DNS 失败当作审计生效。
+sing tracker 关闭连接后仍可能触发域名解析或出站拨号；本用例不证明阻断发生在 DNS 前，
+也不把回环 HTTP 夹具的通过当作实际面板数据库已收到证据。
 运行结果须单独记录，添加测试代码本身不代表这些组合已经通过。

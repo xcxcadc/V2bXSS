@@ -1,21 +1,26 @@
 # 节点安全审计：协议与后端核对
 
-核对日期：2026-10-17。以下区分源码接入与真实客户端验收；后台下拉列表包含某类型，
+核对日期：2026-10-17。以下区分源码接入、隔离回环协议验收与部署后的客户端验收；后台下拉列表包含某类型，
 不代表该类型运行的任意后端都实现了本二开的审计。
 
 ## 本二开 V2bX 的协议
 
 | 面板节点 / 配置 NodeType | 可用内核 | 新审计接入路径 | 验证范围 |
 | --- | --- | --- | --- |
-| Shadowsocks / `shadowsocks` | `xray`、`sing` | Xray dispatcher 或 sing TCP/UDP tracker | 源码、构建及公共逻辑验证；未完成该协议真实客户端端到端验收 |
+| Shadowsocks / `shadowsocks` | `xray`、`sing` | Xray dispatcher 或 sing TCP/UDP tracker | 两内核隔离回环 TCP/UDP 与审计生命周期通过 |
 | VMess / `vmess`（兼容 `v2ray`） | `xray`、`sing` | 同上 | 同上 |
 | Trojan / `trojan` | `xray`、`sing` | 同上 | 同上 |
 | VLESS / `vless` | `xray`、`sing` | 同上 | 同上 |
-| Hysteria 1 / `hysteria` | `sing` | sing TCP/UDP tracker | 同上 |
-| Hysteria 2 / `hysteria2` | `hysteria2`、`sing` | 原生 HY2 RequestFilter 或 sing tracker | **原生 HY2 已有实机 TCP/UDP、混淆、观察/阻断/解除、流量及资格撤销验收**；sing HY2 未做同等实机验收 |
-| TUIC / `tuic` | `sing` | sing TCP/UDP tracker | 源码、构建及公共逻辑验证；未完成该协议真实客户端端到端验收 |
+| Hysteria 1 / `hysteria` | `sing` | sing TCP/UDP tracker | 隔离回环 TCP/UDP 与审计生命周期通过 |
+| Hysteria 2 / `hysteria2` | `hysteria2`、`sing` | 原生 HY2 RequestFilter 或 sing tracker | 两内核隔离回环验收通过；原生 HY2 另有此前的实机混淆等验收记录 |
+| TUIC / `tuic` | `sing` | sing TCP/UDP tracker | 隔离回环 TCP/UDP 与审计生命周期通过 |
 | AnyTLS / `anytls` | `sing` | sing TCP/UDP tracker | 同上 |
 | V2node / `v2node` | 本 V2bX 无该适配 | 无 | **不能把此类型作为本 V2bX 的 NodeType 使用** |
+
+2026-10-17 在隔离远端以同一固定提交逐个运行 13 种内核/协议组合，全部通过；
+包括双向应用字节下限、原 HTTP 流量/在线上报与用户移除。测试使用 sing-box 真实协议
+客户端和内存面板夹具，不代表各桌面/手机客户端、实际面板入库、所有传输变体或所有
+安装环境均已通过。完整范围见 [本轮验收记录](PROTOCOL-VALIDATION-20261017.zh-CN.md)。
 
 新装和原版升级构建都包含 `xray`、`sing`、`hysteria2` 与必要的 QUIC 等标签。
 安装向导只给出各协议适配的内核选择；手写配置也必须符合该表。TLS、端口、传输、
@@ -36,6 +41,8 @@
   新策略通常对新连接生效，已有连接与 UDP 复查边界见 [使用说明](USAGE.zh-CN.md)。
 - “原面板路由”“本地 RuleList”“新增托管规则”是不同来源，删除托管规则不会解除
   独立静态路由或本地规则的阻断。
+- sing tracker 通过关闭已认证客户端连接阻断数据流；固定的上游内核在关闭后仍可能
+  尝试 DNS 解析或出站拨号。本轮不证明 DNS 前拦截或零出站连接尝试。
 
 ## V2node 为什么不能直接使用
 
