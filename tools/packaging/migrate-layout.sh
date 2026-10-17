@@ -22,7 +22,7 @@ while (($#)); do
         *) die '用法：bash migrate-layout.sh [--apply] [--rollback 备份绝对路径]' ;;
     esac
 done
-for dep in realpath sha256sum systemctl install cp ln mv awk sed date flock timeout find dirname id uname; do
+for dep in realpath sha256sum systemctl install cp ln mv awk sed date flock timeout find dirname id uname cmp; do
     command -v "$dep" >/dev/null || die "缺少 $dep"
 done
 safe_path() {
@@ -80,6 +80,14 @@ fi
 [[ ! -e "$base/config.json" && ! -L "$base/current" && ! -e "$base/current" && ! -e "$unit" ]] || die '新目录已有节点安装；拒绝覆盖'
 [[ -z $(systemctl show "$old_service" --property=DropInPaths --value) ]] || die '旧服务含自定义 drop-in，请先人工审查'
 [[ $(systemctl show "$old_service" --property=ExecStart --value) == *"path=$old_base/current/V2bX "* ]] || die '旧服务程序路径不是标准独立安装'
+[[ -f "$script_dir/v2bxss.service" ]] || die '缺少已审查的服务模板'
+normalize_unit() {
+    sed -e 's#/opt/v2bx-audit-test/current/V2bX#/etc/v2bxss/current/v2bxss#g' \
+        -e 's#/etc/v2bx-audit-test#/etc/v2bxss#g' \
+        -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' -e '/^Description=/d' "$1"
+}
+cmp -s <(normalize_unit "$old_unit") <(normalize_unit "$script_dir/v2bxss.service") ||
+    die '旧服务含自定义参数，请先人工审查，避免丢失现有设置'
 for item in current releases v2bxss manager toolchains build-cache; do
     [[ ! -e "$old_config/$item" && ! -L "$old_config/$item" ]] || die "旧配置目录含保留名称：$item"
 done

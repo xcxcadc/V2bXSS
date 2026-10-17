@@ -116,7 +116,13 @@ else
         mv /opt/v2bx-audit-test/current "$fixture/old-current"
     fi
     if [[ "$scenario" == stopped ]]; then echo inactive > "$fixture/old-active"; echo false > "$fixture/old-enabled"; fi
-    if [[ "$scenario" == failed-switch ]]; then
+    if [[ "$scenario" == custom-unit ]]; then
+        printf '\nEnvironment=FIXTURE_CUSTOM=true\n' >> /etc/systemd/system/V2bX-audit-test.service
+        if bash "$migrator" --apply > "$fixture/migrate.log" 2>&1; then exit 1; fi
+        grep -Fq '旧服务含自定义参数' "$fixture/migrate.log"
+        ! grep -Eq '^(start|stop|restart|disable|enable) ' "$fixture/calls"
+        [[ ! -e /etc/v2bxss/config.json ]]
+    elif [[ "$scenario" == failed-switch ]]; then
         if LAYOUT_FAIL_NEW=1 bash "$migrator" --apply > "$fixture/migrate.log" 2>&1; then exit 1; fi
         grep -Fxq active "$fixture/old-active"
         grep -Fxq inactive "$fixture/new-active"
