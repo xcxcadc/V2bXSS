@@ -287,9 +287,21 @@ func exchange(out adapter.Outbound, network, target string) error {
 	if _, err = c.Write(payload); err != nil {
 		return err
 	}
-	got := make([]byte, len(payload))
-	if _, err = io.ReadFull(c, got); err != nil {
-		return err
+	var got []byte
+	if network == "udp" {
+		// Datagram adapters may need space for the encrypted wire frame before
+		// returning the payload. Read one whole datagram, never stream fragments.
+		buf := make([]byte, 65536)
+		n, err := c.Read(buf)
+		if err != nil {
+			return err
+		}
+		got = buf[:n]
+	} else {
+		got = make([]byte, len(payload))
+		if _, err = io.ReadFull(c, got); err != nil {
+			return err
+		}
 	}
 	if !bytes.Equal(got, payload) {
 		return fmt.Errorf("payload mismatch")
