@@ -16,8 +16,8 @@ cat > "$fixture/bin/journalctl" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$MENU_TEST_LOG"
 case "$*" in
-    '--unit V2bX-audit-test.service --no-pager --lines 100 --output short-iso' |
-    '--unit V2bX-audit-test.service --no-pager --lines 100 --output short-iso --follow' |
+    '--unit V2bX-audit-test.service --no-pager --lines 100 --output short-iso' | \
+    '--unit V2bX-audit-test.service --no-pager --lines 100 --output short-iso --follow' | \
     '--unit V2bX.service --no-pager --lines 0 --output short-iso --follow') ;;
     *) exit 91 ;;
 esac
