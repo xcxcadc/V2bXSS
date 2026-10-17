@@ -45,6 +45,9 @@ import (
 
 const fixtureUUID = "55c3e997-6efa-4f83-b624-71b8c704eac7"
 const fixtureUser = 42
+const fixturePayload = "audit-echo-fixture|"
+const fixturePayloadCopies = 16
+const fixturePayloadBytes = int64(len(fixturePayload) * fixturePayloadCopies)
 
 type fixturePanel struct {
 	mu      sync.Mutex
@@ -300,7 +303,7 @@ func exchange(out adapter.Outbound, network, target string) error {
 	stopClose := context.AfterFunc(ctx, func() { c.Close() })
 	defer stopClose()
 	c.SetDeadline(time.Now().Add(2 * time.Second))
-	payload := bytes.Repeat([]byte("audit-echo-fixture|"), 16)
+	payload := bytes.Repeat([]byte(fixturePayload), fixturePayloadCopies)
 	if _, err = c.Write(payload); err != nil {
 		return err
 	}
@@ -365,6 +368,7 @@ func TestProtocolAuditRoundTrip(t *testing.T) {
 				a.Start()
 				t.Cleanup(func() { securityaudit.Unregister(tag); a.Close() })
 				_, out := client(t, kind, info.Common.ServerPort, cert)
+				var deliveredBytes int64
 				for _, phase := range []string{"baseline", "observe", "block", "restored"} {
 					action := phase
 					if phase == "baseline" || phase == "restored" {
@@ -380,6 +384,8 @@ func TestProtocolAuditRoundTrip(t *testing.T) {
 							}
 						} else if err != nil {
 							t.Fatalf("%s %s: %v", phase, network, err)
+						} else {
+							deliveredBytes += fixturePayloadBytes
 						}
 					}
 					if phase == "observe" || phase == "block" {
@@ -402,9 +408,18 @@ func TestProtocolAuditRoundTrip(t *testing.T) {
 				if err := exchange(out, "tcp", tcpTarget); err != nil {
 					t.Fatalf("final restore: %v", err)
 				}
+				deliveredBytes += fixturePayloadBytes
 				traffic, err := c.GetUserTrafficSlice(tag, false)
-				if err != nil || len(traffic) != 1 || traffic[0].UID != fixtureUser || traffic[0].Upload <= 0 || traffic[0].Download <= 0 {
-					t.Fatalf("traffic identity/counters invalid: %+v, %v", traffic, err)
+				// Allow an asynchronous counter wrapper to finish after the final
+				// echo. More ingress may be counted by a core on blocked attempts;
+				// neither direction may lose successfully echoed application bytes.
+				deadline := time.Now().Add(2 * time.Second)
+				for err == nil && len(traffic) == 1 && (traffic[0].Upload < deliveredBytes || traffic[0].Download < deliveredBytes) && time.Now().Before(deadline) {
+					time.Sleep(25 * time.Millisecond)
+					traffic, err = c.GetUserTrafficSlice(tag, false)
+				}
+				if err != nil || len(traffic) != 1 || traffic[0].UID != fixtureUser || traffic[0].Upload < deliveredBytes || traffic[0].Download < deliveredBytes {
+					t.Fatalf("traffic identity/counters invalid (each direction must include %d echoed bytes): %+v, %v", deliveredBytes, traffic, err)
 				}
 				if err = api.ReportUserTraffic(traffic); err != nil {
 					t.Fatal(err)
