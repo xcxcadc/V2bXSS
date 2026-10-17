@@ -85,6 +85,7 @@ menu_fetch_source() {
     menu_commit=$(git -C "$menu_source" rev-parse HEAD)
     [[ "$menu_commit" =~ ^[a-f0-9]{40}$ ]] || die '无法确认源码版本'
     printf '本次版本：%s\n' "$menu_commit"
+    printf '二开源码：https://github.com/xcxcadc/V2bXSS/commit/%s\n' "$menu_commit"
 }
 
 menu_prepare_go() {

@@ -232,6 +232,7 @@ fi
 source_commit="$(git -C "$source_dir" rev-parse HEAD)"
 [[ "$source_commit" =~ ^[a-f0-9]{40}$ ]] || die '源码提交无效'
 [[ -z "$requested_commit" || "$source_commit" == "${requested_commit,,}" ]] || die '源码与指定提交不一致'
+printf '二开源码：https://github.com/xcxcadc/V2bXSS/commit/%s\n' "$source_commit"
 [[ -f "$source_dir/main.go" && -f "$source_dir/tools/packaging/configure-node.py" ]] || die '源码缺少二开构建文件'
 required_go="$(awk '$1=="go" {print $2; exit}' "$source_dir/go.mod")"
 [[ "$required_go" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || die '源码 Go 版本无效'

@@ -6,6 +6,20 @@
 选择安装或更新即可，自动准备依赖、Go 和节点配置，不需要手工 clone 或填写提交号。
 安装的是自己的二开版本；详细说明见 [tools/packaging](tools/packaging/README.zh-CN.md)。
 
+### 本次二开更新（2026-10-17）
+
+安装和原版升级脚本均从 `xcxcadc/V2bXSS` 的 `dev_new` 获取源码，固定本次提交后构建，
+不是下载上游原版程序或旧 Release。两条命令保持不变，原有节点不会被远程自动升级；
+需在自己的节点服务器运行相应入口，新装菜单选择 **1**。
+
+- 已完成 Xray、sing-box、原生 HY2 共 **13 项内核/协议组合**的隔离集成验收，覆盖连接、
+  审计热同步、观察/阻断/解除、流量及在线上报和用户撤权。
+- 修复普通流连接累计流量被后一次读写覆盖的问题；本次安装/升级会包含该修复。
+- 新装管理菜单新增 **11. 实时运行 / 连接日志**，也可执行 `v2bxss logs -f`。
+
+详细结果及未覆盖范围见[逐项验收记录](docs/PROTOCOL-VALIDATION-20261017.zh-CN.md)。
+这不是全部客户端、传输组合或实际面板支付流程都已验收的声明。
+
 [![](https://img.shields.io/badge/TgChat-UnOfficialV2Board%E4%BA%A4%E6%B5%81%E7%BE%A4-green)](https://t.me/unofficialV2board)
 [![](https://img.shields.io/badge/TgChat-YuzukiProjects%E4%BA%A4%E6%B5%81%E7%BE%A4-blue)](https://t.me/YuzukiProjects)
 
