@@ -259,7 +259,11 @@ func client(t *testing.T, kind string, port int, cert string) (*box.Box, adapter
 		ob["down_mbps"] = 100
 	}
 	if kind != "vmess" && kind != "vless" && kind != "shadowsocks" {
-		ob["tls"] = map[string]any{"enabled": true, "server_name": "localhost", "certificate_path": cert}
+		tls := map[string]any{"enabled": true, "server_name": "localhost", "certificate_path": cert}
+		if kind == "tuic" {
+			tls["alpn"] = []string{"h3"}
+		}
+		ob["tls"] = tls
 	}
 	data, _ := json.Marshal(map[string]any{"log": map[string]any{"disabled": true}, "outbounds": []any{ob}})
 	ctx := box.Context(context.Background(), include.InboundRegistry(), include.OutboundRegistry(), include.EndpointRegistry(), include.DNSTransportRegistry(), include.ServiceRegistry())
