@@ -113,7 +113,7 @@ cat > "$fixture_dir/bin/journalctl" <<'JOURNALCTL_STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'journalctl %s\n' "$*" >> "$ENTRY_FIXTURE_LOG/services"
-[[ "$*" == '--unit V2bX-audit-test.service --no-pager --lines 100' ]] || exit 96
+[[ "$*" == '--unit V2bX-audit-test.service --no-pager --lines 100 --output short-iso' ]] || exit 96
 JOURNALCTL_STUB
 cat > "$fixture_dir/bin/uname" <<'UNAME_STUB'
 #!/usr/bin/env bash
@@ -193,7 +193,7 @@ reject 'dependency changes to pinned source are rejected' 'Dependency preparatio
 bash "$entrypoint" status > "$fixture_dir/status.log"
 bash "$entrypoint" logs > "$fixture_dir/logs.log"
 grep -Fxq 'systemctl status --no-pager --full V2bX-audit-test.service' "$ENTRY_FIXTURE_LOG/services"
-grep -Fxq 'journalctl --unit V2bX-audit-test.service --no-pager --lines 100' "$ENTRY_FIXTURE_LOG/services"
+grep -Fxq 'journalctl --unit V2bX-audit-test.service --no-pager --lines 100 --output short-iso' "$ENTRY_FIXTURE_LOG/services"
 pass 'read-only status and logs address only the isolated service (mocked)'
 service_calls_before=$(awk 'END {print NR}' "$ENTRY_FIXTURE_LOG/services")
 for mode in start restart stop; do

@@ -218,10 +218,28 @@ menu_rollback() {
     bash "$selected/rollback-test-node.sh" --backup "$selected" --apply --start
 }
 
+# Read only: never change the log level, configuration or service state.
+# Keep the signal handler in a subshell so it cannot leak into other actions.
+show_logs() (
+    local unit=$1 lines=$2 follow=$3 result=0
+    local args=(--unit "$unit" --no-pager --lines "$lines" --output short-iso)
+    need_command journalctl
+    if [[ "$follow" == true ]]; then
+        args+=(--follow)
+        printf '实时运行/连接日志：%s；按 Ctrl+C 结束查看，不会停止节点。\n' "$unit"
+        printf '仅显示当前日志配置已输出的记录；审计命中证据请在后台查看。\n'
+        trap ':' INT
+    fi
+    journalctl "${args[@]}" || result=$?
+    if [[ "$follow" == true && "$result" == 130 ]]; then exit 0; fi
+    exit "$result"
+)
+
 menu_action() {
     case "$1" in
         7) need_command systemctl; systemctl status --no-pager --full "$service"; return ;;
-        8) need_command journalctl; journalctl --unit "$service" --no-pager --lines 100; return ;;
+        8) show_logs "$service" 100 false; return ;;
+        11) show_logs "$service" 100 true; return ;;
     esac
     menu_require_host
     case "$1" in
@@ -247,22 +265,25 @@ menu_action() {
 
 interactive_menu() {
     local choice
+    # Ctrl+C during the live viewer ends journalctl and returns to this menu.
+    # The viewer runs in its own shell and installs its own INT handler.
+    trap ':' INT
     while true; do
         printf '\n========== V2bXSS 二开管理菜单 ==========\n'
         printf '仓库：xcxcadc/V2bXSS · dev_new\n'
         printf ' 1. 安装 / 更新到最新二开版本\n 2. 添加对接节点（保留已有节点）\n 3. 导入 / 替换配置（自动备份）\n'
         printf ' 4. 启动服务\n 5. 停止服务\n 6. 重启服务\n 7. 查看运行状态\n 8. 查看最近日志\n'
-        printf ' 9. 开启 / 关闭开机自启\n10. 回滚上一版本\n 0. 退出\n'
+        printf ' 9. 开启 / 关闭开机自启\n10. 回滚上一版本\n11. 查看实时运行 / 连接日志（Ctrl+C 返回）\n 0. 退出\n'
         printf '管理服务：%s\n' "$service"
-        read -r -p '请选择 [0-10]：' choice || return 0
+        read -r -p '请选择 [0-11]：' choice || return 0
         case "$choice" in
             0) return 0 ;;
-            [1-9]|10)
+            [1-9]|10|11)
                 # A separate shell preserves errexit inside every action even
                 # when the menu catches its exit code to stay open on failure.
                 bash "${BASH_SOURCE[0]}" __menu_action "$choice" || echo '操作未完成；请查看上方错误。菜单仍可继续使用。'
                 ;;
-            *) echo '请输入 0-10。' ;;
+            *) echo '请输入 0-11。' ;;
         esac
     done
 }
@@ -298,7 +319,14 @@ Actual installation needs Linux root and systemd. No prebuilt Release is assumed
 Management (only V2bX-audit-test.service):
   bash install.sh status
   bash install.sh logs
+  bash install.sh logs -f [--lines 100]
+  bash install.sh logs -f --service V2bX.service
   bash install.sh start|restart|stop [--apply | --dry-run]
+Installed shortcut: v2bxss logs -f (menu option 11). Ctrl+C stops viewing only.
+Log flags: -f/--follow, -n/--lines 0..10000, --service
+V2bX-audit-test.service (default) or V2bX.service (original-service upgrade).
+The viewer uses current journal output; it does not enable access/debug logging
+or collect every connection. Audit matches remain in the panel evidence page.
 State-changing management commands print a plan unless --apply is explicit.
 USAGE
 }
@@ -342,6 +370,10 @@ start_service=false
 explicit_dry_run=false
 download_deps=false
 has_install_option=false
+has_log_option=false
+follow_logs=false
+log_lines=100
+log_service=$service
 while (($#)); do
     case "$1" in
         --commit) commit="${2:?missing full commit SHA}"; has_install_option=true; shift 2 ;;
@@ -353,11 +385,26 @@ while (($#)); do
         --apply) apply=true; shift ;;
         --start) start_service=true; has_install_option=true; shift ;;
         --dry-run) explicit_dry_run=true; shift ;;
+        -f|--follow) follow_logs=true; has_log_option=true; shift ;;
+        -n|--lines)
+            [[ $# -ge 2 ]] || die '--lines requires a number from 0 to 10000'
+            log_lines=$2; has_log_option=true; shift 2 ;;
+        --service)
+            [[ $# -ge 2 ]] || die '--service requires a supported service name'
+            log_service=$2; has_log_option=true; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
     esac
 done
 $apply && $explicit_dry_run && die '--apply and --dry-run conflict'
+if $has_log_option; then
+    [[ "$action" == logs ]] || die 'Log options can only be used with logs'
+fi
+[[ "$log_lines" =~ ^([0-9]{1,4}|10000)$ ]] || die '--lines requires a number from 0 to 10000'
+case "$log_service" in
+    V2bX-audit-test.service|V2bX.service) ;;
+    *) die '--service supports only V2bX-audit-test.service or V2bX.service' ;;
+esac
 
 if [[ "$action" != install ]]; then
     $has_install_option && die 'Install options cannot be used with a management command'
@@ -369,8 +416,8 @@ if [[ "$action" != install ]]; then
             ;;
         logs)
             $apply && die 'logs is read-only; omit --apply'
-            need_command journalctl
-            journalctl --unit "$service" --no-pager --lines 100
+            $explicit_dry_run && die 'logs is read-only; omit --dry-run'
+            show_logs "$log_service" "$log_lines" "$follow_logs"
             ;;
         start|restart|stop)
             if ! $apply; then
