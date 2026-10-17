@@ -20,6 +20,31 @@ menu_item() {
 
 menu_heading() { printf '\n---------- %s ----------\n' "$1"; }
 
+service_state_zh() {
+    case "$1" in
+        active) printf '运行中' ;;
+        inactive) printf '已停止' ;;
+        activating) printf '启动中' ;;
+        deactivating) printf '停止中' ;;
+        reloading) printf '重新加载中' ;;
+        failed) printf '运行失败' ;;
+        maintenance) printf '维护中' ;;
+        *) printf '未安装或状态未知' ;;
+    esac
+}
+
+autostart_state_zh() {
+    case "$1" in
+        enabled) printf '已开启' ;;
+        enabled-runtime) printf '临时开启（重启后失效）' ;;
+        disabled) printf '已关闭' ;;
+        masked|masked-runtime) printf '已禁用（禁止启动）' ;;
+        static|indirect) printf '由其他服务触发' ;;
+        generated|transient|alias|linked|linked-runtime) printf '由系统或关联单元管理' ;;
+        *) printf '未安装或未设置' ;;
+    esac
+}
+
 manager_require_target() {
     need_linux_root
     for target in /etc /usr /usr/local /usr/local/bin "$menu_base" "$menu_base/v2bxss" "$menu_base/manager" "$menu_base/toolchains" "$menu_config"; do
@@ -681,9 +706,9 @@ menu_action() {
 
 interactive_menu() {
     local choice pause state autostart
-    # Ctrl+C during the live viewer ends journalctl and returns to this menu.
-    # The viewer runs in its own shell and installs its own INT handler.
-    trap ':' INT
+    # Exit the manager on Ctrl+C, including while waiting for an action. The
+    # service is independent of this terminal and must never be stopped here.
+    trap 'printf "\n已退出管理菜单，节点服务保持原状态。\n"; exit 130' INT
     while true; do
         printf '\n========== V2bXSS 二开管理菜单 ==========\n'
         printf '仓库：xcxcadc/V2bXSS · dev_new\n'
@@ -696,7 +721,7 @@ interactive_menu() {
         menu_item 5 '停止服务'
         menu_item 6 '重启服务'
         menu_item 7 '查看运行状态'
-        menu_item 8 '查看实时运行 / 连接日志（Ctrl+C 返回）'
+        menu_item 8 '查看实时运行 / 连接日志（Ctrl+C 退出菜单）'
         menu_item 9 '开启 / 关闭开机自启'
         printf '%s\n' '----------------------------------------'
         menu_item 10 '回滚上一版本（二次确认，0 取消）'
@@ -708,8 +733,9 @@ interactive_menu() {
         if [[ -t 0 && -t 1 ]] && command -v systemctl >/dev/null; then
             state=$(systemctl is-active "$service" 2>/dev/null || true)
             autostart=$(systemctl is-enabled "$service" 2>/dev/null || true)
-            printf '运行状态：%s ｜ 开机自启：%s\n' "${state:-未安装}" "${autostart:-未设置}"
+            printf '运行状态：%s ｜ 开机自启：%s\n' "$(service_state_zh "$state")" "$(autostart_state_zh "$autostart")"
         fi
+        printf '按 Ctrl+C 可退出管理菜单，不会停止节点服务。\n'
         read -r -p '请选择 [0-13]：' choice || return 0
         case "$choice" in
             0) return 0 ;;

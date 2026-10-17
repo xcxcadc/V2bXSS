@@ -5,8 +5,11 @@ import json
 import os
 import pathlib
 import pty
+import select
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -39,6 +42,78 @@ def terminal_run(command, answers):
 
 
 class TerminalTests(unittest.TestCase):
+    def menu_interrupt(self, action="", prompt="请选择 [0-13]：", state="inactive", autostart="enabled"):
+        """Send an actual terminal Ctrl+C; never install or manage host services."""
+        with tempfile.TemporaryDirectory() as directory:
+            directory = pathlib.Path(directory)
+            for name, body in {
+                "uname": "echo Darwin",
+                "systemctl": (
+                    'case "$1" in\n'
+                    f'is-active) echo {state}; exit 3 ;;\n'
+                    f'is-enabled) echo {autostart} ;;\n'
+                    'status) echo fixture-status ;;\n'
+                    '*) exit 99 ;;\nesac'
+                ),
+                "journalctl": 'echo fixture-live-log; sleep 60',
+            }.items():
+                target = directory / name
+                target.write_text(f"#!/bin/sh\n{body}\n")
+                target.chmod(0o755)
+            pid, master = pty.fork()
+            if pid == 0:
+                os.environ["PATH"] = f"{directory}:{os.environ['PATH']}"
+                os.execvp("bash", ["bash", str(ROOT / "install.sh")])
+            output = b""
+            status = None
+            try:
+                def wait_for(text):
+                    nonlocal output
+                    deadline = time.monotonic() + 10
+                    while text.encode() not in output:
+                        if time.monotonic() >= deadline:
+                            self.fail(f"terminal did not show {text!r}: {output.decode(errors='replace')}")
+                        if select.select([master], [], [], 0.1)[0]:
+                            output += os.read(master, 8192)
+
+                wait_for("请选择 [0-13]：")
+                if action:
+                    os.write(master, (action + "\n").encode())
+                    wait_for(prompt)
+                os.write(master, b"\x03")
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    ended, status = os.waitpid(pid, os.WNOHANG)
+                    if ended:
+                        break
+                    status = None
+                    if select.select([master], [], [], 0.1)[0]:
+                        try:
+                            output += os.read(master, 8192)
+                        except OSError as error:
+                            if error.errno != errno.EIO:
+                                raise
+                self.assertIsNotNone(status, "Ctrl+C did not exit the manager")
+                self.assertEqual(os.waitstatus_to_exitcode(status), 130, output.decode(errors="replace"))
+                return output.decode(errors="replace")
+            finally:
+                if status is None:
+                    os.killpg(pid, signal.SIGKILL)
+                    os.waitpid(pid, 0)
+                os.close(master)
+
+    def test_status_labels_and_ctrl_c_at_menu(self):
+        output = self.menu_interrupt()
+        self.assertIn("运行状态：已停止 ｜ 开机自启：已开启", output)
+        self.assertNotIn("运行状态：inactive", output)
+
+    def test_ctrl_c_after_action(self):
+        output = self.menu_interrupt("7", "按回车返回主菜单：", "active", "disabled")
+        self.assertIn("运行状态：运行中 ｜ 开机自启：已关闭", output)
+
+    def test_ctrl_c_during_live_logs(self):
+        self.menu_interrupt("8", "fixture-live-log")
+
     def test_main_menu_green_numbering(self):
         with tempfile.TemporaryDirectory() as directory:
             # Prevent manager self-install on the test host, regardless of UID.
