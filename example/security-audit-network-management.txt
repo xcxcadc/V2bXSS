@@ -6,6 +6,12 @@ domain:f2pool.com
 domain:sparkpool.com
 domain:ethermine.org
 domain:nanopool.org
+domain:viabtc.com
+domain:poolin.com
+domain:2miners.com
+domain:hashvault.pro
+domain:minexmr.com
+domain:hiveon.net
 # SMTP 直投端口；启用阻断也会影响合法的邮件直投。
 port:25
 # 仅在有应用协议识别能力的内核中可用；原生 HY2 不支持此项。

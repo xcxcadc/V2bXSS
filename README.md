@@ -22,6 +22,9 @@
 详细结果及未覆盖范围见[逐项验收记录](docs/PROTOCOL-VALIDATION-20261017.zh-CN.md)。
 这不是全部客户端、传输组合或实际面板支付流程都已验收的声明。
 
+网络管理模板、导入格式与能力限制见[网络安全规则说明](docs/NETWORK-RULES.zh-CN.md)；
+本批新增域名和端口测试结果见[网络规则验收记录](docs/NETWORK-VALIDATION-20261017.zh-CN.md)。
+
 [![](https://img.shields.io/badge/TgChat-UnOfficialV2Board%E4%BA%A4%E6%B5%81%E7%BE%A4-green)](https://t.me/unofficialV2board)
 [![](https://img.shields.io/badge/TgChat-YuzukiProjects%E4%BA%A4%E6%B5%81%E7%BE%A4-blue)](https://t.me/YuzukiProjects)
 

@@ -396,13 +396,37 @@ func TestProtocolAuditRoundTrip(t *testing.T) {
 				// Require an authenticated domain-match report as well as a rejected
 				// exchange. A tracker-based core may still attempt DNS after Close;
 				// this probe does not assert that no DNS query is made.
-				version := f.policy("block", "domain_suffix", "example.invalid")
-				eventually(t, "domain policy applied", func() bool { return securityaudit.Version(tag) == version })
 				_, port, _ := net.SplitHostPort(tcpTarget)
-				if err := exchange(out, "tcp", "sub.example.invalid:"+port); err == nil {
-					t.Fatal("domain rule did not reject")
+				for _, rule := range []struct{ kind, value string }{
+					{"domain_exact", "sub.example.invalid"},
+					{"domain_suffix", "example.invalid"},
+					{"domain_regex", `(^|\.)example\.invalid$`},
+				} {
+					version := f.policy("block", rule.kind, rule.value)
+					eventually(t, rule.kind+" applied", func() bool { return securityaudit.Version(tag) == version })
+					if err := exchange(out, "tcp", "sub.example.invalid:"+port); err == nil {
+						t.Fatal(rule.kind + " did not reject")
+					}
+					eventually(t, rule.kind+" authenticated report", func() bool { return f.hasEvent(version, "block", "sub.example.invalid") })
+					t.Log(rule.kind + " block and authenticated report passed")
 				}
-				eventually(t, "domain rule report", func() bool { return f.hasEvent(version, "block", "sub.example.invalid") })
+				// Exercise target-port enforcement through both transport adapters.
+				for network, target := range map[string]string{"tcp": tcpTarget, "udp": udpTarget} {
+					_, targetPort, _ := net.SplitHostPort(target)
+					version := f.policy("block", "port", targetPort)
+					eventually(t, network+" port applied", func() bool { return securityaudit.Version(tag) == version })
+					if err := exchange(out, network, target); err == nil {
+						t.Fatal(network + " target port bypassed block")
+					}
+					eventually(t, network+" port report", func() bool { return f.hasEvent(version, "block", "127.0.0.1") })
+					t.Log(network + " port block and authenticated report passed")
+				}
+				version := f.policy("block", "port", "1")
+				eventually(t, "nonmatching port applied", func() bool { return securityaudit.Version(tag) == version })
+				if err := exchange(out, "tcp", tcpTarget); err != nil {
+					t.Fatalf("nonmatching port incorrectly blocked: %v", err)
+				}
+				deliveredBytes += fixturePayloadBytes
 				version = f.policy("off", "", "")
 				eventually(t, "final release applied", func() bool { return securityaudit.Version(tag) == version })
 				if err := exchange(out, "tcp", tcpTarget); err != nil {
