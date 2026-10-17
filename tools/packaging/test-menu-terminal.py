@@ -80,6 +80,9 @@ class TerminalTests(unittest.TestCase):
                 if action:
                     os.write(master, (action + "\n").encode())
                     wait_for(prompt)
+                # Bash prints read's prompt before finishing terminal setup.
+                # Model a key press once it is waiting, not during tcsetattr.
+                time.sleep(0.1)
                 os.write(master, b"\x03")
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline:
@@ -93,7 +96,7 @@ class TerminalTests(unittest.TestCase):
                         except OSError as error:
                             if error.errno != errno.EIO:
                                 raise
-                self.assertIsNotNone(status, "Ctrl+C did not exit the manager")
+                self.assertIsNotNone(status, f"Ctrl+C did not exit the manager: {output.decode(errors='replace')}")
                 self.assertEqual(os.waitstatus_to_exitcode(status), 130, output.decode(errors="replace"))
                 return output.decode(errors="replace")
             finally:
