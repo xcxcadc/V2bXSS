@@ -1,7 +1,6 @@
 package node
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/InazumaV/V2bX/api/panel"
@@ -57,7 +56,11 @@ func (c *Controller) Start() error {
 		return fmt.Errorf("get user list error: %s", err)
 	}
 	if len(c.userList) == 0 {
-		return errors.New("add users error: not have any user")
+		// An empty authorized snapshot is valid (new node, expired plans, or
+		// exhausted quota). Keep the listener and polling alive with no users;
+		// never let one empty node prevent the other configured nodes starting.
+		log.WithField("node_id", c.apiClient.NodeId).WithField("node_type", c.apiClient.NodeType).
+			Warn("No authorized users; node will reject authentication until the panel supplies users")
 	}
 	c.aliveMap, err = c.apiClient.GetUserAlive()
 	if err != nil {

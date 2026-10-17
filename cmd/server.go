@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"runtime"
@@ -22,7 +23,7 @@ var (
 var serverCommand = cobra.Command{
 	Use:   "server",
 	Short: "Run V2bX server",
-	Run:   serverHandle,
+	RunE:  serverHandle,
 	Args:  cobra.NoArgs,
 }
 
@@ -36,13 +37,13 @@ func init() {
 	command.AddCommand(&serverCommand)
 }
 
-func serverHandle(_ *cobra.Command, _ []string) {
+func serverHandle(_ *cobra.Command, _ []string) error {
 	showVersion()
 	c := conf.New()
 	err := c.LoadFromPath(config)
 	if err != nil {
 		log.WithField("err", err).Error("Load config file failed")
-		return
+		return fmt.Errorf("load config file: %w", err)
 	}
 	switch c.LogConfig.Level {
 	case "debug":
@@ -58,20 +59,22 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		f, err := os.OpenFile(c.LogConfig.Output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			log.WithField("err", err).Error("Open log file failed, using stdout instead")
+		} else {
+			defer f.Close()
+			log.SetOutput(f)
 		}
-		log.SetOutput(f)
 	}
 	limiter.Init()
 	log.Info("Start V2bX...")
 	vc, err := vCore.NewCore(c.CoresConfig)
 	if err != nil {
 		log.WithField("err", err).Error("new core failed")
-		return
+		return fmt.Errorf("new core: %w", err)
 	}
 	err = vc.Start()
 	if err != nil {
 		log.WithField("err", err).Error("Start core failed")
-		return
+		return fmt.Errorf("start core: %w", err)
 	}
 	defer vc.Close()
 	log.Info("Core ", vc.Type(), " started")
@@ -79,7 +82,7 @@ func serverHandle(_ *cobra.Command, _ []string) {
 	err = nodes.Start(c.NodeConfig, vc)
 	if err != nil {
 		log.WithField("err", err).Error("Run nodes failed")
-		return
+		return fmt.Errorf("start nodes: %w", err)
 	}
 	log.Info("Nodes started")
 	xdns := os.Getenv("XRAY_DNS_PATH")
@@ -113,7 +116,7 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		})
 		if err != nil {
 			log.WithField("err", err).Error("start watch failed")
-			return
+			return fmt.Errorf("start config watch: %w", err)
 		}
 	}
 	// clear memory
@@ -124,4 +127,5 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		signal.Notify(osSignals, syscall.SIGINT, syscall.SIGTERM)
 		<-osSignals
 	}
+	return nil
 }
