@@ -283,7 +283,7 @@ func exchange(out adapter.Outbound, network, target string) error {
 	}
 	defer c.Close()
 	c.SetDeadline(time.Now().Add(2 * time.Second))
-	payload := bytes.Repeat([]byte("audit-echo-fixture|"), 64)
+	payload := bytes.Repeat([]byte("audit-echo-fixture|"), 16)
 	if _, err = c.Write(payload); err != nil {
 		return err
 	}
