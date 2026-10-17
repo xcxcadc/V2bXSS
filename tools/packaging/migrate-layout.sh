@@ -103,9 +103,11 @@ flock -n 9 || die '另一项迁移或回滚正在进行'
 stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
 backup="$backup_base/layout-$stamp"
 release="$base/releases/migrated-$stamp"
+[[ ! -e "$backup" && ! -L "$backup" && ! -e "$release" && ! -L "$release" ]] || die '迁移备份或版本目录已经存在'
 install -d -m 0700 "$backup" "$release"
 cp -a "$old_config" "$backup/config"
 cp -a "$old_unit" "$backup/service"
+[[ ! -f /usr/local/bin/v2bxss ]] || cp -a /usr/local/bin/v2bxss "$backup/launcher"
 install -m 0700 "$binary" "$backup/v2bxss"
 timeout 20 "$backup/v2bxss" version > "$backup/version.txt" 2>&1 || die '旧程序无法执行，未停止节点'
 sha256sum "$backup/v2bxss" | awk '{print $1}' > "$backup/binary.sha256"

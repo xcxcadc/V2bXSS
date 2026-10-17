@@ -42,13 +42,14 @@ manager_install() {
     for dep in install mktemp mv cmp; do need_command "$dep"; done
     [[ -f "$source" ]] || die '管理脚本源文件不存在'
     install -d -m 0700 "$menu_base"
-    if [[ -f "$menu_base/v2bxss" ]] && ! cmp -s "$source" "$menu_base/v2bxss"; then
+    if { [[ -f "$menu_base/v2bxss" ]] && ! cmp -s "$source" "$menu_base/v2bxss"; } ||
+       { [[ -f /usr/local/bin/v2bxss ]] && ! grep -Fxq 'manager=/etc/v2bxss/v2bxss' /usr/local/bin/v2bxss; }; then
         backup="/var/backups/v2bxss/manager-$(date -u +%Y%m%dT%H%M%SZ)-$$"
         for target in /var /var/backups /var/backups/v2bxss "$backup"; do
             [[ ! -L "$target" ]] || die "备份路径不能是符号链接：$target"
         done
         install -d -m 0700 "$backup"
-        cp -a "$menu_base/v2bxss" "$backup/v2bxss"
+        [[ ! -f "$menu_base/v2bxss" ]] || cp -a "$menu_base/v2bxss" "$backup/v2bxss"
         [[ ! -f /usr/local/bin/v2bxss ]] || cp -a /usr/local/bin/v2bxss "$backup/launcher"
         printf '管理脚本备份：%s\n' "$backup"
     fi
