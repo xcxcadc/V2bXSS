@@ -216,7 +216,7 @@ func serverNode(t *testing.T, kind, coreType string, port int, cert, key string)
 	}
 	t.Cleanup(func() { c.Close() })
 	common := panel.CommonNode{Host: "127.0.0.1", ServerPort: port, ServerName: "localhost"}
-	n := &panel.NodeInfo{Id: 7, Type: kind, Common: &common, VAllss: &panel.VAllssNode{CommonNode: common, Network: "tcp"}, Shadowsocks: &panel.ShadowsocksNode{CommonNode: common, Cipher: "aes-128-gcm"}, Trojan: &panel.TrojanNode{CommonNode: common, Network: "tcp"}, Tuic: &panel.TuicNode{CommonNode: common, CongestionControl: "cubic"}, AnyTls: &panel.AnyTlsNode{CommonNode: common}, Hysteria: &panel.HysteriaNode{CommonNode: common, UpMbps: 100, DownMbps: 100}, Hysteria2: &panel.Hysteria2Node{CommonNode: common, UpMbps: 100, DownMbps: 100}}
+	n := &panel.NodeInfo{Id: 7, Type: kind, Common: &common, VAllss: &panel.VAllssNode{CommonNode: common, Network: "tcp", NetworkSettings: json.RawMessage(`{}`)}, Shadowsocks: &panel.ShadowsocksNode{CommonNode: common, Cipher: "aes-128-gcm"}, Trojan: &panel.TrojanNode{CommonNode: common, Network: "tcp"}, Tuic: &panel.TuicNode{CommonNode: common, CongestionControl: "cubic"}, AnyTls: &panel.AnyTlsNode{CommonNode: common}, Hysteria: &panel.HysteriaNode{CommonNode: common, UpMbps: 100, DownMbps: 100}, Hysteria2: &panel.Hysteria2Node{CommonNode: common, UpMbps: 100, DownMbps: 100}}
 	certConfig := &conf.CertConfig{CertMode: "none"}
 	if kind != "vmess" && kind != "vless" && kind != "shadowsocks" {
 		n.Security = panel.Tls
